@@ -6,7 +6,8 @@ requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.111.0",
   "pydantic>=2.7.0",
-  "uvicorn[standard]>=0.30.0"
+  "uvicorn[standard]>=0.30.0",
+  "openai>=1.30.0"
 ]
 
 [build-system]

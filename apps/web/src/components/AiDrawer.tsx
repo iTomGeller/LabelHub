@@ -1,31 +1,19 @@
 "use client";
 
-import { useState } from "react";
-import type { SchemaRiskReport } from "@labelhub/contracts";
-
-const riskReport: SchemaRiskReport = {
-  taskId: "task_text_cls_001",
-  schemaVersionId: "schema_v1_text_cls",
-  riskLevel: "medium",
-  traceId: "trace_task_text_cls_001",
-  findings: [
-    {
-      componentId: "reason",
-      severity: "medium",
-      message: "判断理由有最小长度校验，但缺少引用原文关键词的结构化检查。",
-      recommendation: "为 reason 增加自定义校验或在质检规则中加入引用要求。"
-    },
-    {
-      componentId: "llm_hint",
-      severity: "low",
-      message: "LLM 辅助组件已配置 Prompt，但未限制输出字段。",
-      recommendation: "声明 outputPath 和可采纳字段。"
-    }
-  ]
-};
+import { useState, useEffect } from "react";
 
 export function AiDrawer() {
   const [open, setOpen] = useState(false);
+  const [health, setHealth] = useState<{ status: string; model: string; api_key_set: boolean } | null>(null);
+  const [healthError, setHealthError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    fetch("/agent-api/health")
+      .then((r) => r.json())
+      .then(setHealth)
+      .catch((e) => setHealthError(e.message));
+  }, [open]);
 
   return (
     <>
@@ -56,67 +44,72 @@ export function AiDrawer() {
                 </svg>
               </button>
             </div>
-            <p className="mt-1 text-sm text-ink/60">当前步骤的建议和风险提示。</p>
 
-            {/* Risk Report */}
-            <section className="mt-6 rounded-xl border border-warning/20 bg-warning/5 p-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-bold text-primary">发布前风险</h3>
-                <span className="rounded-full bg-warning/10 px-2.5 py-1 text-xs font-bold text-warning">中风险</span>
-              </div>
-              <div className="mt-3 space-y-3">
-                {riskReport.findings.map((f, i) => (
-                  <div key={i} className="rounded-lg bg-white p-3">
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono text-xs font-bold text-primary">{f.componentId}</span>
-                      <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${
-                        f.severity === "medium" ? "bg-warning/10 text-warning" : "bg-primary/10 text-primary/60"
-                      }`}>
-                        {f.severity}
-                      </span>
-                    </div>
-                    <p className="mt-1.5 text-sm text-ink/70">{f.message}</p>
-                    <p className="mt-1 text-sm font-medium text-accent">{f.recommendation}</p>
+            {/* Connection Status */}
+            <section className="mt-4 rounded-xl border border-primary/10 bg-surface/50 p-4">
+              <h3 className="text-sm font-bold text-primary">DeepSeek 连接状态</h3>
+              {healthError ? (
+                <div className="mt-2 flex items-center gap-2">
+                  <span className="h-2 w-2 rounded-full bg-danger" />
+                  <span className="text-sm text-danger">离线：{healthError}</span>
+                </div>
+              ) : health ? (
+                <div className="mt-2 space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="h-2 w-2 rounded-full bg-success" />
+                    <span className="text-sm text-success font-bold">在线</span>
                   </div>
-                ))}
+                  <p className="text-xs text-ink/60">模型：{health.model}</p>
+                  <p className="text-xs text-ink/60">API Key：{health.api_key_set ? "已配置" : "未配置"}</p>
+                </div>
+              ) : (
+                <p className="mt-2 text-sm text-ink/40">检查中…</p>
+              )}
+            </section>
+
+            {/* How it works */}
+            <section className="mt-5">
+              <h3 className="text-sm font-bold text-primary">工作流说明</h3>
+              <div className="mt-3 space-y-2 text-sm text-ink/70">
+                <div className="flex items-start gap-2">
+                  <span className="shrink-0 mt-0.5 h-5 w-5 rounded-full bg-accent/10 flex items-center justify-center text-xs font-bold text-accent">1</span>
+                  <span>填写任务名称和说明，导入样例数据</span>
+                </div>
+                <div className="flex items-start gap-2">
+                  <span className="shrink-0 mt-0.5 h-5 w-5 rounded-full bg-accent/10 flex items-center justify-center text-xs font-bold text-accent">2</span>
+                  <span>点击"AI 一键配置"，DeepSeek 自动生成模板和规则</span>
+                </div>
+                <div className="flex items-start gap-2">
+                  <span className="shrink-0 mt-0.5 h-5 w-5 rounded-full bg-accent/10 flex items-center justify-center text-xs font-bold text-accent">3</span>
+                  <span>在步骤 2/3 中微调组件和规则</span>
+                </div>
+                <div className="flex items-start gap-2">
+                  <span className="shrink-0 mt-0.5 h-5 w-5 rounded-full bg-accent/10 flex items-center justify-center text-xs font-bold text-accent">4</span>
+                  <span>发布后，B/C 通过 API 消费 TaskPackage</span>
+                </div>
               </div>
             </section>
 
-            {/* Quick Actions */}
-            <section className="mt-6">
-              <h3 className="text-sm font-bold text-primary">快捷操作</h3>
-              <div className="mt-3 grid gap-2">
-                <button className="rounded-xl border border-primary/10 bg-surface px-4 py-3 text-left text-sm font-bold text-primary hover:border-accent">
-                  生成模板草案
-                </button>
-                <button className="rounded-xl border border-primary/10 bg-surface px-4 py-3 text-left text-sm font-bold text-primary hover:border-accent">
-                  优化任务说明
-                </button>
-                <button className="rounded-xl border border-primary/10 bg-surface px-4 py-3 text-left text-sm font-bold text-primary hover:border-accent">
-                  草拟质检规则
-                </button>
-                <button className="rounded-xl border border-primary/10 bg-surface px-4 py-3 text-left text-sm font-bold text-primary hover:border-accent">
-                  数据画像分析
-                </button>
+            {/* B/C Integration */}
+            <section className="mt-5 rounded-xl border border-accent/20 bg-accent/5 p-4">
+              <h3 className="text-sm font-bold text-primary">B/C 模块消费接口</h3>
+              <div className="mt-2 space-y-2 text-xs font-mono text-ink/70">
+                <p className="rounded-lg bg-white px-3 py-2">GET /api/tasks/{"{taskId}"}/package</p>
+                <p className="rounded-lg bg-white px-3 py-2">GET /api/tasks/{"{taskId}"}/schema/current</p>
+                <p className="rounded-lg bg-white px-3 py-2">GET /api/tasks/{"{taskId}"}/instructions</p>
+                <p className="rounded-lg bg-white px-3 py-2">GET /api/tasks/{"{taskId}"}/items/next</p>
               </div>
+              <p className="mt-2 text-xs text-ink/50">B（标注工作台）和 C（审核工作台）调用以上接口获取任务配置。</p>
             </section>
 
-            {/* Tool Calls */}
-            <section className="mt-6">
-              <h3 className="text-sm font-bold text-primary">最近工具调用</h3>
-              <ul className="mt-3 space-y-2 text-sm">
-                <li className="flex items-center justify-between text-ink/60">
-                  <span>读取任务包</span>
-                  <span className="text-xs text-success">42ms</span>
-                </li>
-                <li className="flex items-center justify-between text-ink/60">
-                  <span>抽样数据集</span>
-                  <span className="text-xs text-success">88ms</span>
-                </li>
-                <li className="flex items-center justify-between text-ink/60">
-                  <span>模板风险检查</span>
-                  <span className="text-xs text-success">1.8s</span>
-                </li>
+            {/* Tips */}
+            <section className="mt-5">
+              <h3 className="text-sm font-bold text-primary">使用技巧</h3>
+              <ul className="mt-2 space-y-1 text-sm text-ink/60 list-disc pl-4">
+                <li>任务说明越详细，AI 生成质量越高</li>
+                <li>导入 3-5 条样例数据可大幅提升生成效果</li>
+                <li>AI 生成后所有字段均可手动调整</li>
+                <li>质检规则的严重度会影响 Agent 预审行为</li>
               </ul>
             </section>
           </aside>
