@@ -8,6 +8,7 @@ HOST = '8.146.231.216'
 USER = 'root'
 PASSWORD = 'REDACTED_USE_ENV_VAR'
 
+
 def main():
     ssh = paramiko.SSHClient()
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
@@ -15,11 +16,11 @@ def main():
 
     commands = [
         ('git pull', 'cd /opt/labelhub-a && git pull origin feature/member-a-task-config'),
-        ('rebuild agent-runtime', 'cd /opt/labelhub-a/deploy && docker compose -p labelhub_a up -d --build agent-runtime 2>&1 | tail -10'),
+        ('rebuild api', 'cd /opt/labelhub-a/deploy && docker compose -p labelhub_a up -d --build api 2>&1 | tail -10'),
         ('rebuild web', 'cd /opt/labelhub-a/deploy && docker compose -p labelhub_a up -d --build web 2>&1 | tail -10'),
-        ('health check: agent', 'sleep 3 && curl -s http://localhost:8000/health'),
-        ('health check: web', 'curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/'),
-        ('health check: agent-api proxy', 'curl -s http://localhost:3000/agent-api/health'),
+        ('health: api', 'sleep 5 && curl -s http://localhost:8080/api/tasks/health'),
+        ('health: web', 'curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/'),
+        ('health: deepseek', 'curl -s http://localhost:8080/agents/health'),
     ]
 
     for label, cmd in commands:

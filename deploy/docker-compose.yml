@@ -5,12 +5,11 @@ services:
       dockerfile: apps/web/Dockerfile
     environment:
       NEXT_PUBLIC_API_BASE_URL: http://api:8080/api
-      AGENT_RUNTIME_URL: http://agent-runtime:8000
+      AGENT_RUNTIME_URL: http://api:8080
     ports:
       - "3000:3000"
     depends_on:
       - api
-      - agent-runtime
 
   api:
     build:
@@ -21,6 +20,8 @@ services:
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/labelhub
       SPRING_DATASOURCE_USERNAME: labelhub
       SPRING_DATASOURCE_PASSWORD: labelhub
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
     ports:
       - "8080:8080"
     depends_on:
@@ -29,15 +30,6 @@ services:
       redis:
         condition: service_started
 
-  agent-runtime:
-    build:
-      context: ..
-      dockerfile: apps/agent-runtime/Dockerfile
-    environment:
-      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-REDACTED_USE_ENV_VAR}
-      DEEPSEEK_BASE_URL: https://api.deepseek.com
-    ports:
-      - "8000:8000"
 
   mysql:
     image: mysql:8.4
