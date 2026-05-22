@@ -1,19 +1,23 @@
 const navItems = [
-  { label: "数据总览", href: "#dashboard" },
-  { label: "任务配置", href: "#tasks", active: true },
-  { label: "数据导入", href: "#datasets" },
-  { label: "模板搭建", href: "#schema-builder" },
-  { label: "智能助手", href: "#agents" },
-  { label: "链路观测", href: "#observability" },
-  { label: "导出中心", href: "#export" }
-];
+  { key: "dashboard", label: "数据总览", href: "/?view=dashboard" },
+  { key: "tasks", label: "任务配置", href: "/?view=tasks" },
+  { key: "datasets", label: "数据导入", href: "/?view=datasets" },
+  { key: "schema", label: "模板搭建", href: "/?view=schema" },
+  { key: "agents", label: "智能助手", href: "/?view=agents" },
+  { key: "observability", label: "链路观测", href: "/?view=observability" },
+  { key: "export", label: "导出中心", href: "/?view=export" }
+] as const;
+
+export type ViewKey = (typeof navItems)[number]["key"];
 
 export function AppShell({
   children,
-  agentPanel
+  agentPanel,
+  activeView
 }: {
   children: React.ReactNode;
   agentPanel: React.ReactNode;
+  activeView: ViewKey;
 }) {
   return (
     <div className="min-h-screen bg-surface text-ink">
@@ -34,7 +38,7 @@ export function AppShell({
             <a
               key={item.href}
               className={`block rounded-xl px-4 py-3 text-sm font-semibold transition ${
-                item.active ? "bg-accent text-white shadow-lg" : "text-white/80 hover:bg-white/10 hover:text-white"
+                item.key === activeView ? "bg-accent text-white shadow-lg" : "text-white/80 hover:bg-white/10 hover:text-white"
               }`}
               href={item.href}
             >
