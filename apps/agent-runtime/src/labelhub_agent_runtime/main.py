@@ -51,8 +51,8 @@ class GenerateResponse(BaseModel):
 # ─── Endpoints ───
 
 @app.get("/health")
-def health() -> dict[str, str]:
-    return {"status": "ok", "model": "deepseek-chat", "api_key_set": bool(DEEPSEEK_API_KEY)}
+def health() -> dict:
+    return {"status": "ok", "model": "deepseek-chat", "api_key_set": len(DEEPSEEK_API_KEY) > 0}
 
 
 @app.post("/agents/generate-task-config", response_model=GenerateResponse)
