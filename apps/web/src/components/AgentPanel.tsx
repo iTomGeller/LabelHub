@@ -25,24 +25,24 @@ export function AgentPanel() {
   return (
     <div className="flex h-full flex-col gap-5">
       <div>
-        <p className="text-xs font-bold uppercase tracking-[0.24em] text-accent">Agent Panel</p>
+        <p className="text-xs font-bold uppercase tracking-[0.24em] text-accent">智能助手面板</p>
         <h2 className="mt-2 font-display text-2xl font-bold text-primary">任务构建建议</h2>
         <p className="mt-2 text-sm leading-6 text-ink/70">
-          SchemaAssistAgent、RubricDraftAgent 和 DatasetProfileAgent 的输出只进入任务配置建议，不直接影响审核结论。
+          模板生成助手、规则草拟助手和数据画像助手的输出只进入任务配置建议，不直接影响审核结论。
         </p>
       </div>
 
       <section className="rounded-2xl border border-primary/10 bg-surface p-4">
         <div className="flex items-center justify-between">
           <h3 className="font-semibold text-primary">发布前风险</h3>
-          <span className="rounded-full bg-warning/10 px-3 py-1 text-xs font-bold text-warning">medium</span>
+          <span className="rounded-full bg-warning/10 px-3 py-1 text-xs font-bold text-warning">中风险</span>
         </div>
         <div className="mt-4 space-y-3">
           {riskReport.findings.map((finding) => (
             <article key={`${finding.componentId}-${finding.message}`} className="rounded-xl bg-white p-3">
               <div className="flex items-center gap-2 text-xs font-bold text-primary">
-                <span>{finding.componentId ?? "task"}</span>
-                <span className="rounded-full bg-primary/10 px-2 py-0.5">{finding.severity}</span>
+                <span>{finding.componentId ?? "任务"}</span>
+                <span className="rounded-full bg-primary/10 px-2 py-0.5">{formatSeverity(finding.severity)}</span>
               </div>
               <p className="mt-2 text-sm leading-5 text-ink/80">{finding.message}</p>
               <p className="mt-2 text-sm font-medium text-accent">{finding.recommendation}</p>
@@ -54,9 +54,9 @@ export function AgentPanel() {
       <section className="rounded-2xl border border-primary/10 p-4">
         <h3 className="font-semibold text-primary">工具调用</h3>
         <ul className="mt-3 space-y-2 text-sm text-ink/75">
-          <li>task.getPackage: ok / 42ms</li>
-          <li>dataset.sample: ok / 88ms</li>
-          <li>rubric.getVersion: ok / 35ms</li>
+          <li>读取任务包：成功 / 42ms</li>
+          <li>抽样数据集：成功 / 88ms</li>
+          <li>读取规则版本：成功 / 35ms</li>
         </ul>
       </section>
 
@@ -69,4 +69,15 @@ export function AgentPanel() {
       </div>
     </div>
   );
+}
+
+function formatSeverity(severity: SchemaRiskReport["findings"][number]["severity"]) {
+  const labels: Record<SchemaRiskReport["findings"][number]["severity"], string> = {
+    low: "低",
+    medium: "中",
+    high: "高",
+    critical: "严重"
+  };
+
+  return labels[severity];
 }

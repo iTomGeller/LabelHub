@@ -10,18 +10,22 @@ export default function Home() {
   return (
     <AppShell agentPanel={<AgentPanel />}>
       <div className="space-y-6">
-        <TaskWizard taskPackage={mockTaskPackage} />
-        <div className="grid grid-cols-4 gap-4">
+        <section id="tasks" className="scroll-mt-20">
+          <TaskWizard taskPackage={mockTaskPackage} />
+        </section>
+        <section id="dashboard" className="grid scroll-mt-20 grid-cols-4 gap-4">
           <Metric label="Schema 物料" value="10" hint="满足飞书基础物料要求" />
           <Metric label="发布检查" value="10/10" hint="基础信息、数据、Rubric、AgentPolicy" />
           <Metric label="样本数据" value="1,000" hint="JSONL/Excel 导入目标" />
           <Metric label="Trace 覆盖" value="A 侧" hint="创建、保存、导入、发布" />
-        </div>
-        <SchemaBuilder components={mockTaskPackage.schema.components} />
-        <div className="grid grid-cols-[1fr_420px] gap-6">
+        </section>
+        <section id="schema-builder" className="scroll-mt-20">
+          <SchemaBuilder components={mockTaskPackage.schema.components} />
+        </section>
+        <section id="datasets" className="grid scroll-mt-20 grid-cols-[1fr_420px] gap-6">
           <DatasetImport />
           <TaskPackagePreview taskPackage={mockTaskPackage} />
-        </div>
+        </section>
       </div>
     </AppShell>
   );

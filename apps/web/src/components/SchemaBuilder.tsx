@@ -15,14 +15,16 @@ const componentLabels: Record<string, string> = {
 
 export function SchemaBuilder({ components }: { components: SchemaComponent[] }) {
   const selected = components[1] ?? components[0];
-  const advancedRules = ["字段联动", "条件显示", "联动校验", "自定义校验", "分组容器", "多 Tab 布局"];
+  const advancedRules = ["字段联动", "条件显示", "联动校验", "自定义校验", "分组容器", "多标签页布局"];
 
   return (
     <section className="rounded-3xl border border-primary/10 bg-white shadow-panel">
       <div className="flex items-center justify-between border-b border-primary/10 px-5 py-4">
         <div>
-          <h2 className="font-display text-2xl font-bold text-primary">SchemaBuilder</h2>
-          <p className="text-sm text-ink/60">Designer 与 Renderer 解耦，产物为可版本化 JSON Schema。</p>
+          <h2 className="font-display text-2xl font-bold text-primary">标注模板搭建器</h2>
+          <p className="text-sm text-ink/60">
+            搭建器与渲染器解耦，产物为可版本化的标注模板 JSON。
+          </p>
         </div>
         <div className="flex gap-2">
           <button className="rounded-xl border border-primary/20 px-4 py-2 text-sm font-bold text-primary">
@@ -34,7 +36,7 @@ export function SchemaBuilder({ components }: { components: SchemaComponent[] })
 
       <div className="grid grid-cols-[220px_minmax(0,1fr)_280px]">
         <aside className="border-r border-primary/10 p-4">
-          <h3 className="text-sm font-bold text-primary">ComponentLib</h3>
+          <h3 className="text-sm font-bold text-primary">组件库</h3>
           <div className="mt-3 space-y-2">
             {SUPPORTED_COMPONENT_TYPES.map((type) => (
               <button
@@ -71,15 +73,15 @@ export function SchemaBuilder({ components }: { components: SchemaComponent[] })
         </div>
 
         <aside className="border-l border-primary/10 p-4">
-          <h3 className="text-sm font-bold text-primary">PropertyPanel</h3>
+          <h3 className="text-sm font-bold text-primary">属性配置</h3>
           {selected ? (
             <div className="mt-4 space-y-3 text-sm">
               <label className="block">
-                <span className="font-semibold text-primary">label</span>
+                <span className="font-semibold text-primary">字段名称</span>
                 <input className="mt-1 w-full rounded-xl border border-primary/20 px-3 py-2" value={selected.label} readOnly />
               </label>
               <label className="block">
-                <span className="font-semibold text-primary">dataPath</span>
+                <span className="font-semibold text-primary">数据路径</span>
                 <input
                   className="mt-1 w-full rounded-xl border border-primary/20 px-3 py-2 font-mono"
                   value={selected.dataPath}
@@ -87,14 +89,15 @@ export function SchemaBuilder({ components }: { components: SchemaComponent[] })
                 />
               </label>
               <label className="block">
-                <span className="font-semibold text-primary">required</span>
-                <select className="mt-1 w-full rounded-xl border border-primary/20 px-3 py-2" value={`${selected.required}`} disabled>
-                  <option>true</option>
-                  <option>false</option>
-                </select>
+                <span className="font-semibold text-primary">是否必填</span>
+                <input
+                  className="mt-1 w-full rounded-xl border border-primary/20 px-3 py-2"
+                  value={selected.required ? "是" : "否"}
+                  readOnly
+                />
               </label>
               <div className="rounded-xl bg-surface p-3">
-                <p className="font-semibold text-primary">validation</p>
+                <p className="font-semibold text-primary">校验规则</p>
                 <pre className="mt-2 overflow-auto text-xs text-ink/70">
                   {JSON.stringify(selected.validation, null, 2)}
                 </pre>

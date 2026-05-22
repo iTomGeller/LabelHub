@@ -6,12 +6,12 @@ export function TaskWizard({ taskPackage }: { taskPackage: TaskPackage }) {
   const checks = [
     { label: "基础信息", ok: Boolean(taskPackage.title) },
     { label: "富文本说明", ok: Boolean(taskPackage.schema.description) },
-    { label: "Schema", ok: taskPackage.schema.components.length >= 10 },
+    { label: "标注模板", ok: taskPackage.schema.components.length >= 10 },
     { label: "数据", ok: taskPackage.sampleItems.length > 0 },
-    { label: "Rubric", ok: taskPackage.rubric.rules.length > 0 },
-    { label: "Prompt 模板", ok: Boolean(taskPackage.rubric.promptTemplate) },
+    { label: "质检规则", ok: taskPackage.rubric.rules.length > 0 },
+    { label: "提示词模板", ok: Boolean(taskPackage.rubric.promptTemplate) },
     { label: "评分维度", ok: taskPackage.rubric.dimensions.length >= 4 },
-    { label: "AgentPolicy", ok: taskPackage.agentPolicy.precheckEnabled },
+    { label: "智能预审策略", ok: taskPackage.agentPolicy.precheckEnabled },
     { label: "分配策略", ok: taskPackage.assignmentPolicy.mode === "auto_claim" },
     { label: "配额/截止时间", ok: taskPackage.assignmentPolicy.deadlineHours > 0 }
   ];
@@ -20,14 +20,14 @@ export function TaskWizard({ taskPackage }: { taskPackage: TaskPackage }) {
     <section className="rounded-3xl border border-primary/10 bg-white p-5 shadow-panel">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <p className="text-xs font-bold uppercase tracking-[0.24em] text-accent">Owner Wizard</p>
+          <p className="text-xs font-bold uppercase tracking-[0.24em] text-accent">负责人工作台</p>
           <h1 className="mt-2 font-display text-4xl font-bold text-primary">任务创建与发布</h1>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-ink/70">
-            A 模块负责把业务需求、数据样例、Schema、Rubric 和 AgentPolicy 冻结成 TaskPackage，
-            让 B 可以渲染标注页，C 可以执行预审。
+            A 模块负责把业务需求、数据样例、标注模板、质检规则和智能预审策略冻结成任务包，
+            让 B 可以渲染标注页，C 可以执行自动预审。
           </p>
         </div>
-        <button className="rounded-2xl bg-accent px-5 py-3 text-sm font-bold text-white">生成 TaskPackage</button>
+        <button className="rounded-2xl bg-accent px-5 py-3 text-sm font-bold text-white">生成任务包</button>
       </div>
 
       <div className="mt-6 grid grid-cols-6 gap-2">
@@ -44,11 +44,11 @@ export function TaskWizard({ taskPackage }: { taskPackage: TaskPackage }) {
           <h2 className="font-bold text-primary">任务基础配置</h2>
           <div className="mt-4 grid grid-cols-2 gap-3">
             <Field label="任务名称" value={taskPackage.title} />
-            <Field label="任务状态" value={taskPackage.status} />
-            <Field label="分发策略" value={taskPackage.assignmentPolicy.mode} />
+            <Field label="任务状态" value={formatStatus(taskPackage.status)} />
+            <Field label="分发策略" value={formatAssignmentMode(taskPackage.assignmentPolicy.mode)} />
             <Field label="截止时间" value={`${taskPackage.assignmentPolicy.deadlineHours} 小时`} />
             <Field label="置信度阈值" value={`${taskPackage.agentPolicy.confidenceThreshold}`} />
-            <Field label="模型偏好" value={taskPackage.agentPolicy.modelPreference} />
+            <Field label="模型偏好" value={formatModel(taskPackage.agentPolicy.modelPreference)} />
           </div>
         </div>
 
@@ -62,7 +62,7 @@ export function TaskWizard({ taskPackage }: { taskPackage: TaskPackage }) {
                   check.ok ? "bg-success/10 text-success" : "bg-danger/10 text-danger"
                 }`}
               >
-              {check.ok ? "ok" : "!"} {check.label}
+                {check.ok ? "通过" : "待补充"} {check.label}
               </div>
             ))}
           </div>
@@ -79,4 +79,29 @@ function Field({ label, value }: { label: string; value: string }) {
       <input className="mt-1 w-full rounded-xl border border-primary/20 px-3 py-2 text-sm" value={value} readOnly />
     </label>
   );
+}
+
+function formatStatus(status: TaskPackage["status"]) {
+  const labels: Record<TaskPackage["status"], string> = {
+    draft: "草稿",
+    publishing: "发布中",
+    paused: "已暂停",
+    ended: "已结束"
+  };
+
+  return labels[status];
+}
+
+function formatAssignmentMode(mode: TaskPackage["assignmentPolicy"]["mode"]) {
+  const labels: Record<TaskPackage["assignmentPolicy"]["mode"], string> = {
+    auto_claim: "自动领取",
+    manual: "人工指派",
+    quota: "配额领取"
+  };
+
+  return labels[mode];
+}
+
+function formatModel(model: string) {
+  return model === "mock-local" ? "本地模拟模型" : model;
 }
