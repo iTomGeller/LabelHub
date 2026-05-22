@@ -1,0 +1,88 @@
+services:
+  web:
+    build:
+      context: ..
+      dockerfile: apps/web/Dockerfile
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: http://api:8080/api
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+  api:
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+    environment:
+      LABELHUB_API_PORT: 8080
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/labelhub
+      SPRING_DATASOURCE_USERNAME: labelhub
+      SPRING_DATASOURCE_PASSWORD: labelhub
+    ports:
+      - "8080:8080"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+  agent-runtime:
+    build:
+      context: ..
+      dockerfile: apps/agent-runtime/Dockerfile
+    ports:
+      - "8000:8000"
+
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: labelhub
+      MYSQL_USER: labelhub
+      MYSQL_PASSWORD: labelhub
+      MYSQL_ROOT_PASSWORD: labelhub-root
+    ports:
+      - "3306:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - mysql-data:/var/lib/mysql
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: labelhub
+      MINIO_ROOT_PASSWORD: labelhub-secret
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3001:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+
+volumes:
+  mysql-data:
+  minio-data:
+  grafana-data:
