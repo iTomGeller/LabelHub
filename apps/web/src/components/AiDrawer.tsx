@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 
 export function AiDrawer() {
   const [open, setOpen] = useState(false);
-  const [health, setHealth] = useState<{ status: string; model: string; api_key_set: boolean } | null>(null);
+  const [health, setHealth] = useState<{ status: string; model: string; api_key_set: string } | null>(null);
   const [healthError, setHealthError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -60,7 +60,7 @@ export function AiDrawer() {
                     <span className="text-sm text-success font-bold">在线</span>
                   </div>
                   <p className="text-xs text-ink/60">模型：{health.model}</p>
-                  <p className="text-xs text-ink/60">API Key：{health.api_key_set ? "已配置" : "未配置"}</p>
+                  <p className="text-xs text-ink/60">API Key：{health.api_key_set === "yes" ? "已配置" : "未配置"}</p>
                 </div>
               ) : (
                 <p className="mt-2 text-sm text-ink/40">检查中…</p>
