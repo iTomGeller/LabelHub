@@ -77,7 +77,7 @@ export function AiDrawer() {
                 </div>
                 <div className="flex items-start gap-2">
                   <span className="shrink-0 mt-0.5 h-5 w-5 rounded-full bg-accent/10 flex items-center justify-center text-xs font-bold text-accent">2</span>
-                  <span>点击"AI 一键配置"，DeepSeek 自动生成模板和规则</span>
+                  <span>点击【AI 一键配置】，DeepSeek 自动生成模板和规则</span>
                 </div>
                 <div className="flex items-start gap-2">
                   <span className="shrink-0 mt-0.5 h-5 w-5 rounded-full bg-accent/10 flex items-center justify-center text-xs font-bold text-accent">3</span>
