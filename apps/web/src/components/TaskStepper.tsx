@@ -213,6 +213,22 @@ export function TaskStepper({ taskId }: { taskId?: string }) {
     setLoading(true);
     setError(null);
     try {
+      let sampleData = config.sampleData;
+      if (sampleData.length === 0) {
+        const sampleRes = await fetch("/agent-api/agents/generate-sample-data", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ taskName: config.taskName || "未命名任务", instruction: config.instruction || null, count: 6 }),
+        });
+        if (sampleRes.ok) {
+          const sampleResult = await sampleRes.json();
+          if (sampleResult.sampleData?.length > 0) {
+            sampleData = sampleResult.sampleData;
+            setConfig((prev) => ({ ...prev, sampleData }));
+          }
+        }
+      }
+
       const res = await fetch("/agent-api/agents/generate-task-config", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -220,7 +236,7 @@ export function TaskStepper({ taskId }: { taskId?: string }) {
           taskId: config.taskId,
           taskName: config.taskName || "未命名标注任务",
           instruction: config.instruction || "根据数据推断标注需求",
-          sampleData: config.sampleData.slice(0, 5),
+          sampleData: sampleData.slice(0, 5),
           traceId: `trace_${Date.now()}`,
         }),
       });
@@ -548,17 +564,24 @@ function DataPreviewTable({ data, setConfig, taskName, instruction }: { data: Re
             </tr>
           </thead>
           <tbody>
-            {pageData.map((row, i) => (
-              <tr key={page * pageSize + i} className="border-t border-primary/5 group hover:bg-surface/50">
-                <td className="px-2 py-2 text-center text-xs text-ink/30">{page * pageSize + i + 1}</td>
-                {fields.map((f) => <td key={f} className="px-3 py-2 text-xs text-ink/80 max-w-[200px] truncate">{String(row[f] ?? "")}</td>)}
-                <td className="px-2 py-2 text-center">
-                  <button onClick={() => handleDeleteRow(i)} className="opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-600 transition" title="删除此行">
-                    <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-                  </button>
-                </td>
-              </tr>
-            ))}
+            {pageData.map((row, i) => {
+              const globalIdx = page * pageSize + i;
+              return (
+                <tr key={globalIdx} className="border-t border-primary/5 group hover:bg-surface/50">
+                  <td className="px-2 py-2 text-center text-xs text-ink/30">{globalIdx + 1}</td>
+                  {fields.map((f) => (
+                    <td key={f} className="px-1 py-1">
+                      <input type="text" value={String(row[f] ?? "")} onChange={(e) => { const val = e.target.value; setConfig((prev) => ({ ...prev, sampleData: prev.sampleData.map((r, ri) => ri === globalIdx ? { ...r, [f]: val } : r) })); }} className="w-full rounded border border-transparent hover:border-primary/15 focus:border-accent px-2 py-1 text-xs text-ink/80 focus:outline-none bg-transparent" />
+                    </td>
+                  ))}
+                  <td className="px-2 py-2 text-center">
+                    <button onClick={() => handleDeleteRow(i)} className="opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-600 transition" title="删除此行">
+                      <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -572,15 +595,16 @@ function DataPreviewTable({ data, setConfig, taskName, instruction }: { data: Re
       )}
 
       <div className="mt-4 flex items-center gap-3 flex-wrap">
-        <button onClick={handleAddRow} className="rounded-xl border border-dashed border-primary/30 px-4 py-2 text-sm text-primary hover:border-accent hover:text-accent transition">+ 手动新增一行</button>
+        <button onClick={() => { setAppendCount(1); handleAiAppend(); }} disabled={aiAppendLoading || !taskName.trim()} className="rounded-xl border border-dashed border-accent/30 px-4 py-2 text-sm text-accent hover:bg-accent/5 transition disabled:opacity-40">+ AI 智能生成 1 行</button>
         <div className="flex items-center gap-2 rounded-xl border border-accent/20 bg-accent/5 px-3 py-1.5">
-          <span className="text-xs text-ink/60">AI 追加</span>
+          <span className="text-xs text-ink/60">批量生成</span>
           <input type="number" min={1} max={20} value={appendCount} onChange={(e) => setAppendCount(Math.max(1, Math.min(20, parseInt(e.target.value) || 1)))} className="w-12 rounded-lg border border-primary/15 px-2 py-1 text-xs text-center" />
           <span className="text-xs text-ink/60">条</span>
           <button onClick={handleAiAppend} disabled={aiAppendLoading || !taskName.trim()} className={`rounded-lg px-3 py-1 text-xs font-bold text-white transition ${aiAppendLoading || !taskName.trim() ? "bg-accent/40 cursor-not-allowed" : "bg-accent hover:bg-accent/90"}`}>
             {aiAppendLoading ? "生成中…" : "AI 生成"}
           </button>
         </div>
+        <button onClick={handleAddRow} className="rounded-xl border border-dashed border-primary/20 px-4 py-2 text-sm text-ink/40 hover:text-primary hover:border-primary/30 transition">+ 手动空行</button>
       </div>
     </div>
   );
@@ -591,7 +615,26 @@ function DataPreviewTable({ data, setConfig, taskName, instruction }: { data: Re
 function StepTemplate({ config, setConfig }: { config: TaskConfig; setConfig: React.Dispatch<React.SetStateAction<TaskConfig>> }) {
   const [selectedIdx, setSelectedIdx] = useState<number | null>(config.schemaComponents.length > 0 ? 0 : null);
   const [showPresets, setShowPresets] = useState(false);
+  const [aiLoading, setAiLoading] = useState(false);
   const selected = selectedIdx !== null ? config.schemaComponents[selectedIdx] : null;
+
+  async function handleAiGenTemplate() {
+    setAiLoading(true);
+    try {
+      const res = await fetch("/agent-api/agents/generate-task-config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ taskName: config.taskName || "未命名任务", instruction: config.instruction || "", sampleData: config.sampleData.slice(0, 5) }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (data.schemaComponents?.length > 0) {
+        setConfig((prev) => ({ ...prev, schemaComponents: data.schemaComponents }));
+        setSelectedIdx(0);
+      }
+    } catch (e) { alert("AI 生成模板失败: " + (e instanceof Error ? e.message : "未知错误")); }
+    finally { setAiLoading(false); }
+  }
 
   function updateComponent(idx: number, patch: Partial<SchemaComponent>) {
     setConfig((prev) => ({ ...prev, schemaComponents: prev.schemaComponents.map((c, i) => (i === idx ? { ...c, ...patch } : c)) }));
@@ -627,6 +670,9 @@ function StepTemplate({ config, setConfig }: { config: TaskConfig; setConfig: Re
         </div>
         <div className="flex items-center gap-2">
           <span className="rounded-full bg-accent/10 px-3 py-1 text-xs font-bold text-accent">{config.schemaComponents.length} 个组件</span>
+          <button onClick={handleAiGenTemplate} disabled={aiLoading} className={`rounded-lg px-3 py-1.5 text-xs font-bold text-white transition ${aiLoading ? "bg-accent/50 cursor-wait" : "bg-accent hover:bg-accent/90"}`}>
+            {aiLoading ? "AI 生成中…" : "AI 智能生成"}
+          </button>
           <button onClick={() => setShowPresets(true)} className="rounded-lg border border-accent px-3 py-1.5 text-xs font-bold text-accent hover:bg-accent/5">+ 添加组件</button>
         </div>
       </div>
@@ -786,6 +832,23 @@ function EditField({ label, value, onChange, mono }: { label: string; value: str
 
 function StepRules({ config, setConfig }: { config: TaskConfig; setConfig: React.Dispatch<React.SetStateAction<TaskConfig>> }) {
   const [newDim, setNewDim] = useState("");
+  const [aiLoading, setAiLoading] = useState(false);
+
+  async function handleAiGenRules() {
+    setAiLoading(true);
+    try {
+      const res = await fetch("/agent-api/agents/generate-task-config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ taskName: config.taskName || "未命名任务", instruction: config.instruction || "", sampleData: config.sampleData.slice(0, 5) }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (data.rubricRules?.length > 0) setConfig((prev) => ({ ...prev, rubricRules: data.rubricRules }));
+      if (data.rubricDimensions?.length > 0) setConfig((prev) => ({ ...prev, rubricDimensions: data.rubricDimensions }));
+    } catch (e) { alert("AI 生成规则失败: " + (e instanceof Error ? e.message : "未知错误")); }
+    finally { setAiLoading(false); }
+  }
 
   function updateRule(idx: number, patch: Partial<RubricRule>) {
     setConfig((prev) => ({ ...prev, rubricRules: prev.rubricRules.map((r, i) => (i === idx ? { ...r, ...patch } : r)) }));
@@ -820,6 +883,9 @@ function StepRules({ config, setConfig }: { config: TaskConfig; setConfig: React
             <h2 className="text-xl font-bold text-primary">质检规则</h2>
             <p className="mt-1 text-sm text-ink/60">配置评分维度和质检规则，关联到具体标注组件</p>
           </div>
+          <button onClick={handleAiGenRules} disabled={aiLoading} className={`rounded-lg px-3 py-1.5 text-xs font-bold text-white transition ${aiLoading ? "bg-accent/50 cursor-wait" : "bg-accent hover:bg-accent/90"}`}>
+            {aiLoading ? "AI 生成中…" : "AI 智能生成"}
+          </button>
           <button onClick={addRule} className="rounded-lg border border-accent px-3 py-1.5 text-xs font-bold text-accent hover:bg-accent/5">+ 新增规则</button>
         </div>
 
@@ -938,6 +1004,33 @@ function RuleCard({ rule, idx, components, updateRule, removeRule }: { rule: Rub
 function StepPublish({ config, allPassed, checks, onPublish }: { config: TaskConfig; allPassed: boolean; checks: { label: string; ok: boolean }[]; onPublish: () => void }) {
   const [showJson, setShowJson] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [dagLoading, setDagLoading] = useState(false);
+  const [dagResult, setDagResult] = useState<{ pipelineId: string; stages: { stage: string; status: string; durationMs: number; output: Record<string, unknown> }[]; allPassed: boolean } | null>(null);
+
+  const STAGE_LABELS: Record<string, string> = {
+    task_context_builder: "任务上下文构建",
+    skill_loader: "技能加载",
+    dataset_sampler: "样例数据采样",
+    schema_generator: "模板 Schema 生成",
+    rubric_generator: "质检 Rubric 生成",
+    critic: "AI 审核评审",
+    task_package_writer: "任务包组装",
+  };
+
+  async function runDagCheck() {
+    setDagLoading(true);
+    try {
+      const res = await fetch("/agent-api/agents/pipeline", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ taskName: config.taskName, instruction: config.instruction, sampleData: config.sampleData.slice(0, 5) }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setDagResult(data);
+    } catch (e) { alert("DAG 校验失败: " + (e instanceof Error ? e.message : "未知错误")); }
+    finally { setDagLoading(false); }
+  }
 
   const taskPackageJson = {
     taskId: config.taskId,
@@ -981,9 +1074,42 @@ function StepPublish({ config, allPassed, checks, onPublish }: { config: TaskCon
         )}
       </div>
 
+      {/* Multi-Agent DAG Check */}
+      <div className="rounded-2xl border border-accent/20 bg-white p-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="font-bold text-primary">多 Agent DAG 校验</h3>
+            <p className="mt-0.5 text-xs text-ink/50">7-stage 流水线：上下文构建 → 技能加载 → 数据采样 → Schema → Rubric → 评审 → 组装</p>
+          </div>
+          <button onClick={runDagCheck} disabled={dagLoading} className={`rounded-xl px-4 py-2 text-sm font-bold text-white transition ${dagLoading ? "bg-accent/50 cursor-wait" : "bg-accent hover:bg-accent/90"}`}>
+            {dagLoading ? "校验中…" : dagResult ? "重新校验" : "运行 DAG 校验"}
+          </button>
+        </div>
+
+        {dagResult && (
+          <div className="mt-4 space-y-2">
+            <div className="flex items-center gap-2 mb-3">
+              <span className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-bold ${dagResult.allPassed ? "bg-success/10 text-success" : "bg-warning/10 text-warning"}`}>
+                {dagResult.allPassed ? "全部通过" : "存在警告"}
+              </span>
+              <span className="text-xs text-ink/40">Pipeline: {dagResult.pipelineId}</span>
+            </div>
+            {dagResult.stages.map((s) => (
+              <div key={s.stage} className="flex items-center gap-3 rounded-xl bg-surface/60 px-4 py-2.5">
+                <span className={`h-2.5 w-2.5 rounded-full flex-shrink-0 ${s.status === "success" ? "bg-success" : s.status === "warning" ? "bg-warning" : "bg-danger"}`} />
+                <span className="text-sm font-medium text-primary flex-1">{STAGE_LABELS[s.stage] || s.stage}</span>
+                <span className="text-xs text-ink/40">{s.durationMs}ms</span>
+                <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${s.status === "success" ? "bg-success/10 text-success" : s.status === "warning" ? "bg-warning/10 text-warning" : "bg-danger/10 text-danger"}`}>{s.status}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Basic Checks */}
       <div className="rounded-2xl border border-primary/10 bg-white p-6">
         <div className="flex items-center justify-between">
-          <h3 className="font-bold text-primary">发布检查</h3>
+          <h3 className="font-bold text-primary">基础检查</h3>
           <span className={`rounded-full px-3 py-1 text-xs font-bold ${allPassed ? "bg-success/10 text-success" : "bg-warning/10 text-warning"}`}>{checks.filter(c => c.ok).length}/{checks.length} 通过</span>
         </div>
         <div className="mt-4 grid gap-2 md:grid-cols-2">

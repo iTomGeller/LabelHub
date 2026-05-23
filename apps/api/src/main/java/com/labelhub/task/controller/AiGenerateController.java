@@ -1,6 +1,7 @@
 package com.labelhub.task.controller;
 
 import com.labelhub.task.service.AgentMetrics;
+import com.labelhub.task.service.AgentPipelineService;
 import com.labelhub.task.service.DeepSeekService;
 import com.labelhub.task.service.DeepSeekService.GenerateTaskConfigRequest;
 import com.labelhub.task.service.DeepSeekService.GenerateTaskConfigResponse;
@@ -15,10 +16,12 @@ import java.util.Map;
 public class AiGenerateController {
     private final DeepSeekService deepSeekService;
     private final AgentMetrics agentMetrics;
+    private final AgentPipelineService agentPipelineService;
 
-    public AiGenerateController(DeepSeekService deepSeekService, AgentMetrics agentMetrics) {
+    public AiGenerateController(DeepSeekService deepSeekService, AgentMetrics agentMetrics, AgentPipelineService agentPipelineService) {
         this.deepSeekService = deepSeekService;
         this.agentMetrics = agentMetrics;
+        this.agentPipelineService = agentPipelineService;
     }
 
     @GetMapping("/health")
@@ -78,5 +81,18 @@ public class AiGenerateController {
         );
         return ResponseEntity.ok(new SampleDataResponse(samples,
                 "已根据任务「" + request.taskName() + "」生成 " + samples.size() + " 条样例数据"));
+    }
+
+    public record PipelineRequest(String taskName, String instruction, List<Map<String, Object>> sampleData) {}
+
+    @PostMapping("/pipeline")
+    public ResponseEntity<AgentPipelineService.PipelineResponse> executePipeline(@RequestBody PipelineRequest request) {
+        agentMetrics.recordPipelineStage("pipeline-request", 0);
+        var result = agentPipelineService.executePipeline(new AgentPipelineService.PipelineRequest(
+                request.taskName() != null ? request.taskName() : "",
+                request.instruction() != null ? request.instruction() : "",
+                request.sampleData() != null ? request.sampleData() : List.of()
+        ));
+        return ResponseEntity.ok(result);
     }
 }
