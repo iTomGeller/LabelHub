@@ -293,7 +293,7 @@ public class DeepSeekService {
     }
 
     public List<Map<String, Object>> generateSampleData(String taskName, String instruction) {
-        agentMetrics.recordAgentCall("sample-gen", true, 0);
+        agentMetrics.recordAgentCall("sample-gen", "start", 0);
 
         String prompt = String.format("""
                 你是一个数据标注平台的样例数据生成助手。
@@ -339,7 +339,7 @@ public class DeepSeekService {
                     .block();
 
             long elapsed = System.currentTimeMillis() - startMs;
-            agentMetrics.recordAgentCall("sample-gen", true, elapsed);
+            agentMetrics.recordAgentCall("sample-gen", "success", elapsed);
             callsSuccess.increment();
             callLatency.record(Duration.ofMillis(elapsed));
 
@@ -358,7 +358,7 @@ public class DeepSeekService {
 
         } catch (Exception e) {
             long elapsed = System.currentTimeMillis() - startMs;
-            agentMetrics.recordAgentCall("sample-gen", false, elapsed);
+            agentMetrics.recordAgentCall("sample-gen", "error", elapsed);
             callsFallback.increment();
             log.warn("DeepSeek sample generation failed for '{}': {}", taskName, e.getMessage());
             return fallbackSampleData(taskName);
