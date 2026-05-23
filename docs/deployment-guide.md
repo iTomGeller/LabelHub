@@ -93,10 +93,10 @@ cd deploy
 docker compose -p labelhub_a up -d --build
 ```
 
-或使用脚本：
+或使用部署脚本（需设置环境变量）：
 
 ```bash
-python scripts/redeploy.py
+ECS_PASSWORD=xxx python scripts/redeploy.py
 ```
 
 ## 4. 日志查看

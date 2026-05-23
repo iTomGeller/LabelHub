@@ -123,6 +123,25 @@ http://localhost:8080/swagger-ui.html
 | `SPRING_DATASOURCE_URL` | MySQL 连接地址 | `jdbc:mysql://mysql:3306/labelhub` |
 | `LABELHUB_API_PORT` | API 服务端口 | `8080` |
 
+## 文档目录
+
+| 文档 | 路径 | 说明 |
+|------|------|------|
+| 架构设计 | `docs/architecture.md` | 系统架构、模块关系、数据流 |
+| 开发过程 | `docs/development-process.md` | 5 个 Sprint 迭代记录 |
+| AI Coding 过程 | `docs/ai-coding-process.md` | Cursor Agent 辅助开发全流程记录 |
+| 部署指南 | `docs/deployment-guide.md` | ECS 部署、Nginx 配置、故障排查 |
+| API 文档 | `docs/api/member-a-api.md` | A 模块所有 REST 接口详细说明 |
+| Schema 契约 | `docs/contracts/schema-contract.md` | A↔B 标注模板数据格式 |
+| Rubric 契约 | `docs/contracts/rubric-contract.md` | A↔C 质检规则数据格式 |
+| Prompt 契约 | `docs/contracts/prompt-template-contract.md` | AI 生成模板 |
+
+## 演示环境
+
+- **访问地址**: `http://8.146.231.216`（阿里云 ECS，Nginx 反向代理）
+- **功能演示**: 4 步任务创建 → AI 一键配置 → 发布任务包
+- **API 测试**: `http://8.146.231.216/swagger-ui.html`
+
 ## 开发规范
 
 - 代码提交使用 Conventional Commits 格式
@@ -130,3 +149,13 @@ http://localhost:8080/swagger-ui.html
 - 前端使用 TypeScript 严格模式
 - API 设计遵循 RESTful 规范
 - 敏感信息（API Key 等）禁止提交到代码仓库，使用环境变量注入
+
+## 交付物清单
+
+- [x] 源码仓库（GitHub）
+- [x] 中文 README
+- [x] 架构图 / 技术文档
+- [x] AI Coding 过程记录
+- [x] 可访问演示环境
+- [x] API 文档（Swagger + Markdown）
+- [ ] 5-10 分钟演示视频（待录制）

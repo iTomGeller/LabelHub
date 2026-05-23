@@ -109,7 +109,48 @@ A 发布后产出标准 TaskPackage JSON，B/C 通过 `GET /api/tasks/{id}/packa
 - **端到端验证**: curl 验证所有接口返回正确
 - **前端验证**: TypeScript 严格模式编译通过
 
-## 8. 后续规划
+## 8. AI Coding 工具使用说明
+
+### 8.1 开发工具链
+
+| 工具 | 作用 | 使用场景 |
+|------|------|---------|
+| Cursor IDE | AI 辅助编码 | 全流程代码生成、重构、调试 |
+| Cursor Agent (Claude Opus) | 多轮对话式编程 | 复杂功能实现、架构决策 |
+| Git + GitHub | 版本控制 | 代码管理、团队协作 |
+| Docker Compose | 容器化部署 | 本地开发、ECS 生产环境 |
+
+### 8.2 Cursor Agent 使用方式
+
+```
+# 典型工作流
+1. 提供需求描述和上下文文件（如飞书计划文档）
+2. Agent 分析需求，生成代码方案
+3. 人工审核、提供反馈
+4. Agent 迭代修改直到满足要求
+5. Agent 执行部署和验证
+```
+
+### 8.3 AI 参与的关键环节
+
+- **骨架搭建**: monorepo 结构、Spring Boot 初始化、Next.js 初始化
+- **业务逻辑**: Controller/Service/DTO 编写、数据库迁移
+- **前端组件**: React 组件、Tailwind 样式、交互逻辑
+- **UX 优化**: 根据人工反馈重构 UI 流程
+- **集成调试**: API 联调、代理配置、错误修复
+- **部署运维**: Dockerfile、Nginx 配置、ECS 部署脚本
+- **文档编写**: README、API 文档、架构文档、本文档
+
+### 8.4 人工关键介入点
+
+- UX 方向决策（"4 步流程"优于"全部展示"）
+- 技术路线纠偏（"后端全部 Java"）
+- 安全审计（发现 API Key 泄露）
+- 最终验收和反馈
+
+> 详细的 AI Coding 过程记录参见 [`docs/ai-coding-process.md`](ai-coding-process.md)
+
+## 9. 后续规划
 
 - [ ] 任务数据持久化（MySQL）
 - [ ] 文件上传到 MinIO
