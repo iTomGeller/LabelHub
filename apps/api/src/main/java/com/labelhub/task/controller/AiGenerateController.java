@@ -63,4 +63,18 @@ public class AiGenerateController {
         agentMetrics.recordTaskStatusChange("draft");
         return ResponseEntity.ok(result);
     }
+
+    public record SampleDataRequest(String taskName, String instruction) {}
+    public record SampleDataResponse(List<Map<String, Object>> sampleData, String message) {}
+
+    @PostMapping("/generate-sample-data")
+    public ResponseEntity<SampleDataResponse> generateSampleData(@RequestBody SampleDataRequest request) {
+        agentMetrics.recordPipelineStage("sample-gen-start", 0);
+        var samples = deepSeekService.generateSampleData(
+                request.taskName() != null ? request.taskName() : "未命名任务",
+                request.instruction()
+        );
+        return ResponseEntity.ok(new SampleDataResponse(samples,
+                "已根据任务「" + request.taskName() + "」生成 " + samples.size() + " 条样例数据"));
+    }
 }

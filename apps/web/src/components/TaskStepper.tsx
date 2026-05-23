@@ -235,7 +235,7 @@ export function TaskStepper({ taskId }: { taskId?: string }) {
         agentPolicy: data.agentPolicy || prev.agentPolicy,
         rationale: data.rationale || "",
       }));
-      setStep("template");
+      setStep("publish");
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "AI 生成失败");
     } finally {
@@ -287,6 +287,16 @@ export function TaskStepper({ taskId }: { taskId?: string }) {
 
   return (
     <div className="space-y-6">
+      {/* Breadcrumb Navigation */}
+      <div className="flex items-center gap-2">
+        <a href="/?view=list" className="flex items-center gap-1 text-sm text-ink/50 hover:text-accent transition">
+          <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" /></svg>
+          返回任务列表
+        </a>
+        <span className="text-ink/20">/</span>
+        <span className="text-sm font-bold text-primary truncate max-w-[200px]">{config.taskName || "新建任务"}</span>
+      </div>
+
       {/* Progress Bar */}
       <div className="rounded-2xl border border-primary/10 bg-white p-5">
         <div className="flex items-center justify-between">
@@ -346,6 +356,28 @@ function getPublishChecks(config: TaskConfig) {
 function StepUpload({ config, setConfig, onAiGenerate, loading }: { config: TaskConfig; setConfig: React.Dispatch<React.SetStateAction<TaskConfig>>; onAiGenerate: () => void; loading: boolean }) {
   const [pasteMode, setPasteMode] = useState(false);
   const [pasteText, setPasteText] = useState("");
+  const [genSampleLoading, setGenSampleLoading] = useState(false);
+
+  async function handleGenerateSample() {
+    if (!config.taskName.trim()) { alert("请先输入任务名称"); return; }
+    setGenSampleLoading(true);
+    try {
+      const res = await fetch("/agent-api/agents/generate-sample-data", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ taskName: config.taskName, instruction: config.instruction || null }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (data.sampleData && data.sampleData.length > 0) {
+        setConfig((prev) => ({ ...prev, sampleData: data.sampleData }));
+      }
+    } catch (e) {
+      alert("样例数据生成失败: " + (e instanceof Error ? e.message : "未知错误"));
+    } finally {
+      setGenSampleLoading(false);
+    }
+  }
 
   function parseAndSetData(text: string) {
     const trimmed = text.trim();
@@ -398,9 +430,19 @@ function StepUpload({ config, setConfig, onAiGenerate, loading }: { config: Task
         </div>
       </div>
 
+      <div className="rounded-2xl border border-accent/20 bg-accent/5 p-5 flex items-center justify-between gap-4">
+        <div>
+          <h3 className="text-sm font-bold text-primary">智能生成样例数据</h3>
+          <p className="text-xs text-ink/50 mt-0.5">根据任务名称和说明，AI 自动生成 6 条贴合主题的样例数据</p>
+        </div>
+        <button onClick={handleGenerateSample} disabled={genSampleLoading || !config.taskName.trim()} className={`shrink-0 rounded-xl px-5 py-2.5 text-sm font-bold text-white transition ${genSampleLoading || !config.taskName.trim() ? "bg-accent/40 cursor-not-allowed" : "bg-accent hover:bg-accent/90 shadow-sm"}`}>
+          {genSampleLoading ? <span className="flex items-center gap-2"><svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" /></svg>生成中…</span> : "AI 生成样例"}
+        </button>
+      </div>
+
       <div className="rounded-2xl border border-primary/10 bg-white p-6">
         <h3 className="text-lg font-bold text-primary">上传标注数据</h3>
-        <p className="mt-1 text-sm text-ink/60">支持 JSON / JSONL / CSV 文件或直接粘贴</p>
+        <p className="mt-1 text-sm text-ink/60">支持 JSON / JSONL / CSV 文件或直接粘贴，也可用上方 AI 生成</p>
         <div className="mt-4 flex gap-3">
           <label className="flex-1 cursor-pointer rounded-xl border-2 border-dashed border-primary/20 bg-surface p-6 text-center hover:border-accent transition">
             <input type="file" accept=".json,.jsonl,.csv" className="hidden" onChange={handleFileUpload} />

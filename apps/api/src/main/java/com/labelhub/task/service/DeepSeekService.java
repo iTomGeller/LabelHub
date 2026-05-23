@@ -291,4 +291,88 @@ public class DeepSeekService {
         }
         return Map.of();
     }
+
+    public List<Map<String, Object>> generateSampleData(String taskName, String instruction) {
+        agentMetrics.recordAgentCall("sample-gen", true, 0);
+
+        String prompt = String.format("""
+                你是一个数据标注平台的样例数据生成助手。
+                任务名称: %s
+                任务说明: %s
+
+                请根据以上任务信息生成 6 条结构化样例数据，格式为 JSON 数组。
+                每条数据应包含:
+                - id: 唯一编号 (sample_001, sample_002, ...)
+                - content: 需要标注的原始文本内容 (必须与任务主题高度相关、真实自然)
+                - metadata: 元数据对象, 包含 source(来源)和 created_at(日期)
+
+                要求:
+                1. 内容必须贴合任务名称和说明的主题
+                2. 数据多样性高，覆盖不同场景
+                3. 长度适中(每条 50-200 字)
+                4. 只返回 JSON 数组, 不要其他文字
+
+                返回格式:
+                [{"id":"sample_001","content":"...","metadata":{"source":"...","created_at":"2026-05-20"}}]
+                """, taskName, instruction != null ? instruction : "无");
+
+        if (!enabled) {
+            return fallbackSampleData(taskName);
+        }
+
+        long startMs = System.currentTimeMillis();
+        try {
+            Map<String, Object> body = Map.of(
+                    "model", model,
+                    "messages", List.of(Map.of("role", "user", "content", prompt)),
+                    "temperature", 0.8,
+                    "max_tokens", 2000
+            );
+
+            String raw = webClient.post()
+                    .uri("/chat/completions")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .bodyValue(body)
+                    .retrieve()
+                    .bodyToMono(String.class)
+                    .timeout(Duration.ofSeconds(30))
+                    .block();
+
+            long elapsed = System.currentTimeMillis() - startMs;
+            agentMetrics.recordAgentCall("sample-gen", true, elapsed);
+            callsSuccess.increment();
+            callLatency.record(Duration.ofMillis(elapsed));
+
+            JsonNode root = objectMapper.readTree(raw);
+            String content = root.path("choices").get(0).path("message").path("content").asText();
+
+            int usage = root.path("usage").path("total_tokens").asInt(0);
+            if (usage > 0) tokensUsed.increment(usage);
+
+            String cleaned = content.replaceAll("```json\\s*", "").replaceAll("```\\s*", "").trim();
+            List<Map<String, Object>> result = objectMapper.readValue(cleaned,
+                    objectMapper.getTypeFactory().constructCollectionType(List.class, Map.class));
+
+            log.info("Generated {} sample data items for task '{}'", result.size(), taskName);
+            return result;
+
+        } catch (Exception e) {
+            long elapsed = System.currentTimeMillis() - startMs;
+            agentMetrics.recordAgentCall("sample-gen", false, elapsed);
+            callsFallback.increment();
+            log.warn("DeepSeek sample generation failed for '{}': {}", taskName, e.getMessage());
+            return fallbackSampleData(taskName);
+        }
+    }
+
+    private List<Map<String, Object>> fallbackSampleData(String taskName) {
+        return List.of(
+                Map.of("id", "sample_001", "content", "这是一条与「" + taskName + "」相关的示例文本，用于展示标注格式。", "metadata", Map.of("source", "系统生成", "created_at", "2026-05-21")),
+                Map.of("id", "sample_002", "content", "第二条样例数据，展示不同场景下的标注内容。", "metadata", Map.of("source", "系统生成", "created_at", "2026-05-21")),
+                Map.of("id", "sample_003", "content", "第三条样例，测试边界情况和特殊字符处理。", "metadata", Map.of("source", "系统生成", "created_at", "2026-05-21")),
+                Map.of("id", "sample_004", "content", "较长的一条样例文本，模拟真实生产环境中的标注数据长度和复杂度。", "metadata", Map.of("source", "系统生成", "created_at", "2026-05-21")),
+                Map.of("id", "sample_005", "content", "包含多个语义层次的样例，适合复杂标注任务的需求。", "metadata", Map.of("source", "系统生成", "created_at", "2026-05-21")),
+                Map.of("id", "sample_006", "content", "最后一条样例数据，覆盖该任务类型的典型用例。", "metadata", Map.of("source", "系统生成", "created_at", "2026-05-21"))
+        );
+    }
 }

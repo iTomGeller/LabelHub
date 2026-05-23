@@ -1,11 +1,14 @@
+"use client";
+
+import { useState, useEffect } from "react";
 import type { TaskStatus } from "@labelhub/contracts";
 
 const mockTasks = [
   {
     taskId: "task_text_cls_001",
     title: "客服对话情感分类",
-    status: "publishing" as TaskStatus,
-    progress: 10,
+    status: "draft" as TaskStatus,
+    progress: 5,
     total: 10,
     updatedAt: "2026-05-21 14:32"
   },
@@ -42,6 +45,22 @@ const statusColors: Record<TaskStatus, string> = {
 };
 
 export function TaskList() {
+  const [tasks, setTasks] = useState(mockTasks);
+
+  useEffect(() => {
+    setTasks(mockTasks.map(t => {
+      const stored = localStorage.getItem(`labelhub_task_${t.taskId}`);
+      if (stored) {
+        try {
+          const pkg = JSON.parse(stored);
+          if (pkg.status === "published" || pkg.publishedAt) {
+            return { ...t, status: "publishing" as TaskStatus, progress: t.total, updatedAt: pkg.publishedAt ? new Date(pkg.publishedAt).toLocaleString("zh-CN", { hour12: false }).slice(0, 16) : t.updatedAt };
+          }
+        } catch { /* ignore */ }
+      }
+      return t;
+    }));
+  }, []);
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -58,7 +77,7 @@ export function TaskList() {
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        {mockTasks.map((task) => (
+        {tasks.map((task) => (
           <a
             key={task.taskId}
             href={`/?view=task&taskId=${task.taskId}`}
