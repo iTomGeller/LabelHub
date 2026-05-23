@@ -357,6 +357,7 @@ function StepUpload({ config, setConfig, onAiGenerate, loading }: { config: Task
   const [pasteMode, setPasteMode] = useState(false);
   const [pasteText, setPasteText] = useState("");
   const [genSampleLoading, setGenSampleLoading] = useState(false);
+  const [genCount, setGenCount] = useState(6);
 
   async function handleGenerateSample() {
     if (!config.taskName.trim()) { alert("请先输入任务名称"); return; }
@@ -365,12 +366,12 @@ function StepUpload({ config, setConfig, onAiGenerate, loading }: { config: Task
       const res = await fetch("/agent-api/agents/generate-sample-data", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ taskName: config.taskName, instruction: config.instruction || null }),
+        body: JSON.stringify({ taskName: config.taskName, instruction: config.instruction || null, count: genCount }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       if (data.sampleData && data.sampleData.length > 0) {
-        setConfig((prev) => ({ ...prev, sampleData: data.sampleData }));
+        setConfig((prev) => ({ ...prev, sampleData: [...prev.sampleData, ...data.sampleData] }));
       }
     } catch (e) {
       alert("样例数据生成失败: " + (e instanceof Error ? e.message : "未知错误"));
@@ -433,11 +434,15 @@ function StepUpload({ config, setConfig, onAiGenerate, loading }: { config: Task
       <div className="rounded-2xl border border-accent/20 bg-accent/5 p-5 flex items-center justify-between gap-4">
         <div>
           <h3 className="text-sm font-bold text-primary">智能生成样例数据</h3>
-          <p className="text-xs text-ink/50 mt-0.5">根据任务名称和说明，AI 自动生成 6 条贴合主题的样例数据</p>
+          <p className="text-xs text-ink/50 mt-0.5">根据任务名称和说明，AI 自动生成贴合主题的样例数据（追加到已有数据）</p>
         </div>
-        <button onClick={handleGenerateSample} disabled={genSampleLoading || !config.taskName.trim()} className={`shrink-0 rounded-xl px-5 py-2.5 text-sm font-bold text-white transition ${genSampleLoading || !config.taskName.trim() ? "bg-accent/40 cursor-not-allowed" : "bg-accent hover:bg-accent/90 shadow-sm"}`}>
-          {genSampleLoading ? <span className="flex items-center gap-2"><svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" /></svg>生成中…</span> : "AI 生成样例"}
-        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          <input type="number" min={1} max={20} value={genCount} onChange={(e) => setGenCount(Math.max(1, Math.min(20, parseInt(e.target.value) || 1)))} className="w-14 rounded-lg border border-primary/15 px-2 py-2 text-sm text-center" />
+          <span className="text-xs text-ink/50">条</span>
+          <button onClick={handleGenerateSample} disabled={genSampleLoading || !config.taskName.trim()} className={`rounded-xl px-5 py-2.5 text-sm font-bold text-white transition ${genSampleLoading || !config.taskName.trim() ? "bg-accent/40 cursor-not-allowed" : "bg-accent hover:bg-accent/90 shadow-sm"}`}>
+            {genSampleLoading ? <span className="flex items-center gap-2"><svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" /></svg>生成中…</span> : "AI 生成样例"}
+          </button>
+        </div>
       </div>
 
       <div className="rounded-2xl border border-primary/10 bg-white p-6">
@@ -464,7 +469,7 @@ function StepUpload({ config, setConfig, onAiGenerate, loading }: { config: Task
         )}
       </div>
 
-      {config.sampleData.length > 0 && <DataPreviewTable data={config.sampleData} />}
+      {config.sampleData.length > 0 && <DataPreviewTable data={config.sampleData} setConfig={setConfig} taskName={config.taskName} instruction={config.instruction} />}
 
       <div className="rounded-2xl border-2 border-accent/30 bg-accent/5 p-6 text-center">
         <h3 className="text-lg font-bold text-primary">AI 一键生成任务配置</h3>
@@ -478,9 +483,48 @@ function StepUpload({ config, setConfig, onAiGenerate, loading }: { config: Task
   );
 }
 
-function DataPreviewTable({ data }: { data: Record<string, unknown>[] }) {
+function DataPreviewTable({ data, setConfig, taskName, instruction }: { data: Record<string, unknown>[]; setConfig: React.Dispatch<React.SetStateAction<TaskConfig>>; taskName: string; instruction: string }) {
   const fields = Object.keys(data[0] || {});
-  const preview = data.slice(0, 5);
+  const [page, setPage] = useState(0);
+  const [aiAppendLoading, setAiAppendLoading] = useState(false);
+  const [appendCount, setAppendCount] = useState(3);
+  const pageSize = 10;
+  const totalPages = Math.ceil(data.length / pageSize);
+  const pageData = data.slice(page * pageSize, (page + 1) * pageSize);
+
+  function handleDeleteRow(idx: number) {
+    const globalIdx = page * pageSize + idx;
+    setConfig((prev) => ({ ...prev, sampleData: prev.sampleData.filter((_, i) => i !== globalIdx) }));
+  }
+
+  function handleAddRow() {
+    const emptyRow: Record<string, unknown> = {};
+    fields.forEach((f) => { emptyRow[f] = ""; });
+    emptyRow["id"] = `sample_${String(data.length + 1).padStart(3, "0")}`;
+    setConfig((prev) => ({ ...prev, sampleData: [...prev.sampleData, emptyRow] }));
+    setPage(Math.floor(data.length / pageSize));
+  }
+
+  async function handleAiAppend() {
+    if (!taskName.trim()) return;
+    setAiAppendLoading(true);
+    try {
+      const res = await fetch("/agent-api/agents/generate-sample-data", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ taskName, instruction: instruction || null, count: appendCount }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const result = await res.json();
+      if (result.sampleData?.length > 0) {
+        setConfig((prev) => ({ ...prev, sampleData: [...prev.sampleData, ...result.sampleData] }));
+      }
+    } catch (e) {
+      alert("AI 追加生成失败: " + (e instanceof Error ? e.message : "未知错误"));
+    } finally {
+      setAiAppendLoading(false);
+    }
+  }
 
   return (
     <div className="rounded-2xl border border-primary/10 bg-white p-6">
@@ -489,25 +533,55 @@ function DataPreviewTable({ data }: { data: Record<string, unknown>[] }) {
           <h3 className="font-bold text-primary">数据预览</h3>
           <p className="text-xs text-ink/50">共 {data.length} 条数据，{fields.length} 个字段</p>
         </div>
-        <span className="rounded-full bg-success/10 px-3 py-1 text-xs font-bold text-success">数据就绪</span>
+        <div className="flex items-center gap-2">
+          <button onClick={() => setConfig((prev) => ({ ...prev, sampleData: [] }))} className="rounded-lg border border-red-200 px-2.5 py-1 text-xs text-red-500 hover:bg-red-50 transition">清空全部</button>
+          <span className="rounded-full bg-success/10 px-3 py-1 text-xs font-bold text-success">数据就绪</span>
+        </div>
       </div>
       <div className="overflow-x-auto rounded-xl border border-primary/10">
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-surface/80">
+              <th className="px-2 py-2 text-center text-xs font-bold text-ink/40 w-8">#</th>
               {fields.map((f) => <th key={f} className="px-3 py-2 text-left text-xs font-bold text-ink/60 whitespace-nowrap">{f}</th>)}
+              <th className="px-2 py-2 text-center text-xs font-bold text-ink/40 w-10">操作</th>
             </tr>
           </thead>
           <tbody>
-            {preview.map((row, i) => (
-              <tr key={i} className="border-t border-primary/5">
+            {pageData.map((row, i) => (
+              <tr key={page * pageSize + i} className="border-t border-primary/5 group hover:bg-surface/50">
+                <td className="px-2 py-2 text-center text-xs text-ink/30">{page * pageSize + i + 1}</td>
                 {fields.map((f) => <td key={f} className="px-3 py-2 text-xs text-ink/80 max-w-[200px] truncate">{String(row[f] ?? "")}</td>)}
+                <td className="px-2 py-2 text-center">
+                  <button onClick={() => handleDeleteRow(i)} className="opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-600 transition" title="删除此行">
+                    <svg className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                  </button>
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-      {data.length > 5 && <p className="mt-2 text-xs text-ink/40 text-center">显示前 5 条，共 {data.length} 条</p>}
+
+      {totalPages > 1 && (
+        <div className="flex items-center justify-center gap-2 mt-3">
+          <button onClick={() => setPage(Math.max(0, page - 1))} disabled={page === 0} className="rounded-lg border px-2.5 py-1 text-xs disabled:opacity-30">上一页</button>
+          <span className="text-xs text-ink/50">{page + 1} / {totalPages}</span>
+          <button onClick={() => setPage(Math.min(totalPages - 1, page + 1))} disabled={page >= totalPages - 1} className="rounded-lg border px-2.5 py-1 text-xs disabled:opacity-30">下一页</button>
+        </div>
+      )}
+
+      <div className="mt-4 flex items-center gap-3 flex-wrap">
+        <button onClick={handleAddRow} className="rounded-xl border border-dashed border-primary/30 px-4 py-2 text-sm text-primary hover:border-accent hover:text-accent transition">+ 手动新增一行</button>
+        <div className="flex items-center gap-2 rounded-xl border border-accent/20 bg-accent/5 px-3 py-1.5">
+          <span className="text-xs text-ink/60">AI 追加</span>
+          <input type="number" min={1} max={20} value={appendCount} onChange={(e) => setAppendCount(Math.max(1, Math.min(20, parseInt(e.target.value) || 1)))} className="w-12 rounded-lg border border-primary/15 px-2 py-1 text-xs text-center" />
+          <span className="text-xs text-ink/60">条</span>
+          <button onClick={handleAiAppend} disabled={aiAppendLoading || !taskName.trim()} className={`rounded-lg px-3 py-1 text-xs font-bold text-white transition ${aiAppendLoading || !taskName.trim() ? "bg-accent/40 cursor-not-allowed" : "bg-accent hover:bg-accent/90"}`}>
+            {aiAppendLoading ? "生成中…" : "AI 生成"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

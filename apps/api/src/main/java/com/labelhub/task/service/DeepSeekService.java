@@ -292,7 +292,7 @@ public class DeepSeekService {
         return Map.of();
     }
 
-    public List<Map<String, Object>> generateSampleData(String taskName, String instruction) {
+    public List<Map<String, Object>> generateSampleData(String taskName, String instruction, int count) {
         agentMetrics.recordAgentCall("sample-gen", "start", 0);
 
         String prompt = String.format("""
@@ -300,7 +300,7 @@ public class DeepSeekService {
                 任务名称: %s
                 任务说明: %s
 
-                请根据以上任务信息生成 6 条结构化样例数据，格式为 JSON 数组。
+                请根据以上任务信息生成 %d 条结构化样例数据，格式为 JSON 数组。
                 每条数据应包含:
                 - id: 唯一编号 (sample_001, sample_002, ...)
                 - content: 需要标注的原始文本内容 (必须与任务主题高度相关、真实自然)
@@ -314,10 +314,10 @@ public class DeepSeekService {
 
                 返回格式:
                 [{"id":"sample_001","content":"...","metadata":{"source":"...","created_at":"2026-05-20"}}]
-                """, taskName, instruction != null ? instruction : "无");
+                """, taskName, instruction != null ? instruction : "无", count);
 
         if (!enabled) {
-            return fallbackSampleData(taskName);
+            return fallbackSampleData(taskName, count);
         }
 
         long startMs = System.currentTimeMillis();
@@ -361,12 +361,12 @@ public class DeepSeekService {
             agentMetrics.recordAgentCall("sample-gen", "error", elapsed);
             callsFallback.increment();
             log.warn("DeepSeek sample generation failed for '{}': {}", taskName, e.getMessage());
-            return fallbackSampleData(taskName);
+            return fallbackSampleData(taskName, count);
         }
     }
 
-    private List<Map<String, Object>> fallbackSampleData(String taskName) {
-        return List.of(
+    private List<Map<String, Object>> fallbackSampleData(String taskName, int count) {
+        List<Map<String, Object>> all = List.of(
                 Map.of("id", "sample_001", "content", "这是一条与「" + taskName + "」相关的示例文本，用于展示标注格式。", "metadata", Map.of("source", "系统生成", "created_at", "2026-05-21")),
                 Map.of("id", "sample_002", "content", "第二条样例数据，展示不同场景下的标注内容。", "metadata", Map.of("source", "系统生成", "created_at", "2026-05-21")),
                 Map.of("id", "sample_003", "content", "第三条样例，测试边界情况和特殊字符处理。", "metadata", Map.of("source", "系统生成", "created_at", "2026-05-21")),
@@ -374,5 +374,6 @@ public class DeepSeekService {
                 Map.of("id", "sample_005", "content", "包含多个语义层次的样例，适合复杂标注任务的需求。", "metadata", Map.of("source", "系统生成", "created_at", "2026-05-21")),
                 Map.of("id", "sample_006", "content", "最后一条样例数据，覆盖该任务类型的典型用例。", "metadata", Map.of("source", "系统生成", "created_at", "2026-05-21"))
         );
+        return all.subList(0, Math.min(count, all.size()));
     }
 }

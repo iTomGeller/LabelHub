@@ -64,15 +64,17 @@ public class AiGenerateController {
         return ResponseEntity.ok(result);
     }
 
-    public record SampleDataRequest(String taskName, String instruction) {}
+    public record SampleDataRequest(String taskName, String instruction, Integer count) {}
     public record SampleDataResponse(List<Map<String, Object>> sampleData, String message) {}
 
     @PostMapping("/generate-sample-data")
     public ResponseEntity<SampleDataResponse> generateSampleData(@RequestBody SampleDataRequest request) {
         agentMetrics.recordPipelineStage("sample-gen-start", 0);
+        int count = request.count() != null ? Math.max(1, Math.min(20, request.count())) : 6;
         var samples = deepSeekService.generateSampleData(
                 request.taskName() != null ? request.taskName() : "未命名任务",
-                request.instruction()
+                request.instruction(),
+                count
         );
         return ResponseEntity.ok(new SampleDataResponse(samples,
                 "已根据任务「" + request.taskName() + "」生成 " + samples.size() + " 条样例数据"));
