@@ -10,26 +10,19 @@ def run(cmd):
     out = o.read().decode('utf-8', 'replace')
     err = e.read().decode('utf-8', 'replace')
     code = o.channel.recv_exit_status()
-    if out.strip(): print(out[:5000])
-    if err.strip(): print(f'STDERR: {err[:2000]}')
+    if out.strip(): print(out[:3000])
+    if err.strip(): print(f'STDERR: {err[:1000]}')
     print(f'EXIT: {code}')
     return code, out
 
-# Get the last lines of logs including the crash reason
-run('docker logs labelhub_a-grafana-1 2>&1 | tail -50')
+# Check dashboards loaded
+run('curl -s -u admin:labelhub http://127.0.0.1:3001/grafana/api/search?type=dash-db')
 
-# Check the provisioning file on the server
-run('cat /opt/labelhub-a/deploy/grafana/provisioning/datasources/prometheus.yml')
+# Query via datasource to verify data is visible
+run('curl -s -u admin:labelhub "http://127.0.0.1:3001/grafana/api/ds/query" -H "Content-Type: application/json" -d \'{"queries":[{"refId":"A","datasource":{"type":"prometheus","uid":"prometheus"},"expr":"agent_invocations_total","instant":true}],"from":"now-1h","to":"now"}\'')
 
-# Try running grafana with more output
-run('cd /opt/labelhub-a/deploy && docker compose -p labelhub_a rm -f grafana')
-run('cd /opt/labelhub-a/deploy && docker compose -p labelhub_a up -d grafana 2>&1')
-time.sleep(20)
-run('docker logs labelhub_a-grafana-1 2>&1 | grep -i "error\\|fatal\\|panic\\|fail" | tail -20')
-run('docker ps --filter "name=labelhub_a-grafana" --format "{{.Names}} {{.Status}}"')
-
-# If still failing, check if it's the provisioning yaml format
-run('docker exec labelhub_a-grafana-1 cat /etc/grafana/provisioning/datasources/prometheus.yml 2>&1')
+# Public access test
+run('curl -s -o /dev/null -w "%{http_code}" http://8.146.231.216/grafana/api/health')
 
 ssh.close()
 print('\nDONE')

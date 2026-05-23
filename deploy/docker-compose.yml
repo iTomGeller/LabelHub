@@ -75,7 +75,7 @@ services:
       - api
 
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:11.4.0
     environment:
       GF_SERVER_ROOT_URL: "%(protocol)s://%(domain)s/grafana/"
       GF_SERVER_SERVE_FROM_SUB_PATH: "true"
