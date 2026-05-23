@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 
 const STEPS = [
   { key: "upload", label: "上传数据", num: 1 },
@@ -199,6 +199,7 @@ export function TaskStepper({ taskId }: { taskId?: string }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [published, setPublished] = useState(false);
+  const [dagPassed, setDagPassed] = useState(false);
   const currentIdx = STEPS.findIndex((s) => s.key === step);
 
   function goNext() {
@@ -338,15 +339,15 @@ export function TaskStepper({ taskId }: { taskId?: string }) {
       {step === "upload" && <StepUpload config={config} setConfig={setConfig} onAiGenerate={handleAiGenerate} loading={loading} />}
       {step === "template" && <StepTemplate config={config} setConfig={setConfig} />}
       {step === "rules" && <StepRules config={config} setConfig={setConfig} />}
-      {step === "publish" && <StepPublish config={config} allPassed={allPassed} checks={checks} onPublish={handlePublish} />}
+      {step === "publish" && <StepPublish config={config} allPassed={allPassed} checks={checks} onPublish={handlePublish} onDagResult={setDagPassed} />}
 
       <div className="flex items-center justify-between">
         <button onClick={goPrev} disabled={currentIdx === 0} className={`rounded-xl border border-primary/20 px-5 py-2.5 text-sm font-bold ${currentIdx === 0 ? "cursor-not-allowed text-ink/30" : "text-primary hover:border-accent"}`}>上一步</button>
         {currentIdx < STEPS.length - 1 ? (
           <button onClick={goNext} className="rounded-xl bg-accent px-6 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-accent/90">下一步</button>
         ) : (
-          <button onClick={handlePublish} disabled={!allPassed} className={`rounded-xl px-6 py-2.5 text-sm font-bold text-white shadow-sm ${allPassed ? "bg-success hover:bg-success/90" : "bg-ink/20 cursor-not-allowed"}`}>
-            {allPassed ? "发布任务" : `还有 ${checks.filter(c => !c.ok).length} 项未通过`}
+          <button onClick={handlePublish} disabled={!(allPassed && dagPassed)} className={`rounded-xl px-6 py-2.5 text-sm font-bold text-white shadow-sm ${allPassed && dagPassed ? "bg-success hover:bg-success/90" : "bg-ink/20 cursor-not-allowed"}`}>
+            {allPassed && dagPassed ? "发布任务" : !allPassed ? `还有 ${checks.filter(c => !c.ok).length} 项未通过` : "等待 AI 审核通过"}
           </button>
         )}
       </div>
@@ -1001,24 +1002,28 @@ function RuleCard({ rule, idx, components, updateRule, removeRule }: { rule: Rub
 
 /* ─── Step 4: Publish ─── */
 
-function StepPublish({ config, allPassed, checks, onPublish }: { config: TaskConfig; allPassed: boolean; checks: { label: string; ok: boolean }[]; onPublish: () => void }) {
+function StepPublish({ config, allPassed, checks, onPublish, onDagResult }: { config: TaskConfig; allPassed: boolean; checks: { label: string; ok: boolean }[]; onPublish: () => void; onDagResult: (passed: boolean) => void }) {
   const [showJson, setShowJson] = useState(false);
   const [copied, setCopied] = useState(false);
   const [dagLoading, setDagLoading] = useState(false);
-  const [dagResult, setDagResult] = useState<{ pipelineId: string; stages: { stage: string; status: string; durationMs: number; output: Record<string, unknown> }[]; allPassed: boolean } | null>(null);
+  const [dagResult, setDagResult] = useState<{ pipelineId: string; stages: { stage: string; status: string; durationMs: number; output: Record<string, unknown>; summary: string }[]; allPassed: boolean; pipelineLog?: { skillsLoaded: string[]; modelUsed: string; promptSnapshot: string } } | null>(null);
+  const [expandedStage, setExpandedStage] = useState<string | null>(null);
+  const [showTechDetail, setShowTechDetail] = useState(false);
+  const [dagTriggered, setDagTriggered] = useState(false);
 
   const STAGE_LABELS: Record<string, string> = {
-    task_context_builder: "任务上下文构建",
-    skill_loader: "技能加载",
-    dataset_sampler: "样例数据采样",
-    schema_generator: "模板 Schema 生成",
-    rubric_generator: "质检 Rubric 生成",
-    critic: "AI 审核评审",
-    task_package_writer: "任务包组装",
+    task_context_builder: "任务信息完整性",
+    skill_loader: "标注技能匹配",
+    dataset_sampler: "样例数据质量",
+    schema_generator: "标注模板合理性",
+    rubric_generator: "质检规则覆盖度",
+    critic: "综合评审意见",
+    task_package_writer: "发布就绪度",
   };
 
   async function runDagCheck() {
     setDagLoading(true);
+    setDagTriggered(true);
     try {
       const res = await fetch("/agent-api/agents/pipeline", {
         method: "POST",
@@ -1028,9 +1033,16 @@ function StepPublish({ config, allPassed, checks, onPublish }: { config: TaskCon
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setDagResult(data);
-    } catch (e) { alert("DAG 校验失败: " + (e instanceof Error ? e.message : "未知错误")); }
+      onDagResult(data.allPassed === true);
+    } catch (e) { alert("AI 智能审核失败: " + (e instanceof Error ? e.message : "未知错误")); onDagResult(false); }
     finally { setDagLoading(false); }
   }
+
+  useEffect(() => {
+    if (!dagTriggered && config.taskName.trim()) { runDagCheck(); }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const canPublish = allPassed && dagResult?.allPassed === true;
 
   const taskPackageJson = {
     taskId: config.taskId,
@@ -1074,34 +1086,65 @@ function StepPublish({ config, allPassed, checks, onPublish }: { config: TaskCon
         )}
       </div>
 
-      {/* Multi-Agent DAG Check */}
+      {/* AI Smart Review */}
       <div className="rounded-2xl border border-accent/20 bg-white p-6">
         <div className="flex items-center justify-between">
           <div>
-            <h3 className="font-bold text-primary">多 Agent DAG 校验</h3>
-            <p className="mt-0.5 text-xs text-ink/50">7-stage 流水线：上下文构建 → 技能加载 → 数据采样 → Schema → Rubric → 评审 → 组装</p>
+            <h3 className="text-lg font-bold text-primary">AI 智能审核</h3>
+            <p className="mt-0.5 text-xs text-ink/50">多 Agent 协同校验任务配置的完整性和合理性</p>
           </div>
           <button onClick={runDagCheck} disabled={dagLoading} className={`rounded-xl px-4 py-2 text-sm font-bold text-white transition ${dagLoading ? "bg-accent/50 cursor-wait" : "bg-accent hover:bg-accent/90"}`}>
-            {dagLoading ? "校验中…" : dagResult ? "重新校验" : "运行 DAG 校验"}
+            {dagLoading ? "审核中…" : dagResult ? "重新审核" : "开始审核"}
           </button>
         </div>
 
+        {dagLoading && !dagResult && (
+          <div className="mt-4 flex items-center gap-3 rounded-xl bg-surface/60 px-4 py-4">
+            <div className="h-4 w-4 animate-spin rounded-full border-2 border-accent border-t-transparent" />
+            <span className="text-sm text-ink/60">AI 正在对您的任务配置进行多维度审核…</span>
+          </div>
+        )}
+
         {dagResult && (
-          <div className="mt-4 space-y-2">
-            <div className="flex items-center gap-2 mb-3">
-              <span className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-bold ${dagResult.allPassed ? "bg-success/10 text-success" : "bg-warning/10 text-warning"}`}>
-                {dagResult.allPassed ? "全部通过" : "存在警告"}
+          <div className="mt-4 space-y-3">
+            <div className="flex items-center gap-3">
+              <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-bold ${dagResult.allPassed ? "bg-success/10 text-success" : "bg-warning/10 text-warning"}`}>
+                <span className={`h-2 w-2 rounded-full ${dagResult.allPassed ? "bg-success" : "bg-warning"}`} />
+                {dagResult.allPassed ? "审核通过，可以发布" : "存在需关注项，建议修改后再发布"}
               </span>
-              <span className="text-xs text-ink/40">Pipeline: {dagResult.pipelineId}</span>
             </div>
-            {dagResult.stages.map((s) => (
-              <div key={s.stage} className="flex items-center gap-3 rounded-xl bg-surface/60 px-4 py-2.5">
-                <span className={`h-2.5 w-2.5 rounded-full flex-shrink-0 ${s.status === "success" ? "bg-success" : s.status === "warning" ? "bg-warning" : "bg-danger"}`} />
-                <span className="text-sm font-medium text-primary flex-1">{STAGE_LABELS[s.stage] || s.stage}</span>
-                <span className="text-xs text-ink/40">{s.durationMs}ms</span>
-                <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${s.status === "success" ? "bg-success/10 text-success" : s.status === "warning" ? "bg-warning/10 text-warning" : "bg-danger/10 text-danger"}`}>{s.status}</span>
-              </div>
-            ))}
+
+            <div className="space-y-1">
+              {dagResult.stages.map((s) => (
+                <div key={s.stage} className="rounded-xl border border-primary/5 overflow-hidden">
+                  <button onClick={() => setExpandedStage(expandedStage === s.stage ? null : s.stage)} className="w-full flex items-center gap-3 px-4 py-3 hover:bg-surface/40 transition text-left">
+                    <span className={`h-2.5 w-2.5 rounded-full flex-shrink-0 ${s.status === "success" ? "bg-success" : s.status === "warning" ? "bg-warning" : "bg-danger"}`} />
+                    <span className="text-sm font-medium text-primary flex-1">{STAGE_LABELS[s.stage] || s.stage}</span>
+                    <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${s.status === "success" ? "text-success" : s.status === "warning" ? "text-warning" : "text-danger"}`}>
+                      {s.status === "success" ? "通过" : s.status === "warning" ? "警告" : "失败"}
+                    </span>
+                    <svg className={`h-4 w-4 text-ink/30 transition ${expandedStage === s.stage ? "rotate-180" : ""}`} fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /></svg>
+                  </button>
+                  {expandedStage === s.stage && (
+                    <div className="px-4 pb-4 pt-1 border-t border-primary/5">
+                      <p className="text-sm text-ink/70 leading-relaxed">{s.summary}</p>
+                      {showTechDetail && (
+                        <pre className="mt-2 max-h-[120px] overflow-auto rounded-lg bg-surface/60 p-3 text-xs text-ink/50">{JSON.stringify(s.output, null, 2)}</pre>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <div className="flex items-center gap-3 pt-2">
+              <button onClick={() => setShowTechDetail(!showTechDetail)} className="text-xs text-ink/40 hover:text-accent transition">
+                {showTechDetail ? "隐藏技术详情" : "查看技术详情"}
+              </button>
+              {dagResult.pipelineLog && showTechDetail && (
+                <span className="text-xs text-ink/30">模型: {dagResult.pipelineLog.modelUsed} | 技能: {dagResult.pipelineLog.skillsLoaded?.join(", ")}</span>
+              )}
+            </div>
           </div>
         )}
       </div>
@@ -1122,6 +1165,13 @@ function StepPublish({ config, allPassed, checks, onPublish }: { config: TaskCon
         </div>
         {!allPassed && <p className="mt-3 text-xs text-danger">请回到前面的步骤补全未通过项后再发布</p>}
       </div>
+
+      {!canPublish && dagResult && !dagResult.allPassed && (
+        <div className="rounded-2xl border border-warning/30 bg-warning/5 p-4">
+          <p className="text-sm font-bold text-warning">AI 审核未通过，暂不可发布</p>
+          <p className="mt-1 text-xs text-ink/60">请根据上方审核建议修改配置后重新审核。</p>
+        </div>
+      )}
 
       <div className="rounded-2xl border border-accent/20 bg-accent/5 p-5">
         <h3 className="font-bold text-primary">与 B/C 模块的交互</h3>

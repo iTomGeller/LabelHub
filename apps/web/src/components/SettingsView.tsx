@@ -6,7 +6,6 @@ import { SubTabs } from "./SubTabs";
 const TABS = [
   { key: "ai", label: "AI 服务状态" },
   { key: "export", label: "导出设置" },
-  { key: "traces", label: "链路追踪" }
 ];
 
 export function SettingsView() {
@@ -14,7 +13,7 @@ export function SettingsView() {
     <div className="space-y-5">
       <div>
         <h1 className="font-display text-3xl font-bold text-primary">系统设置</h1>
-        <p className="mt-1 text-sm text-ink/60">AI 服务监控、任务包导出和操作记录。</p>
+        <p className="mt-1 text-sm text-ink/60">AI 服务监控、任务包导出。</p>
       </div>
 
       <SubTabs tabs={TABS} defaultTab="ai">
@@ -22,7 +21,6 @@ export function SettingsView() {
           switch (tab) {
             case "ai": return <AiSettings />;
             case "export": return <ExportSettings />;
-            case "traces": return <TracesSettings />;
             default: return null;
           }
         }}
@@ -146,22 +144,81 @@ function StatusCard({ label, endpoint, field }: { label: string; endpoint: strin
 function ExportSettings() {
   const [format, setFormat] = useState("json");
 
+  function getTaskPackages() {
+    const allKeys = Object.keys(localStorage).filter(k => k.startsWith("labelhub_task_"));
+    return allKeys.map(k => { try { return JSON.parse(localStorage.getItem(k) || ""); } catch { return null; } }).filter(Boolean);
+  }
+
+  function toCSV(packages: Record<string, unknown>[]) {
+    if (packages.length === 0) return "";
+    const rows = packages.map(p => ({
+      taskId: p.taskId || "",
+      title: p.title || "",
+      status: p.status || "",
+      componentCount: Array.isArray(p.schema) ? 0 : ((p.schema as Record<string, unknown>)?.components as unknown[] || []).length,
+      ruleCount: ((p.rubric as Record<string, unknown>)?.rules as unknown[] || []).length,
+      dimensionCount: ((p.rubric as Record<string, unknown>)?.dimensions as unknown[] || []).length,
+      assignmentMode: ((p.assignmentPolicy as Record<string, unknown>)?.mode) || "",
+      publishedAt: p.publishedAt || "",
+    }));
+    const header = Object.keys(rows[0]).join(",");
+    const body = rows.map(r => Object.values(r).map(v => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
+    return header + "\n" + body;
+  }
+
+  function toMarkdown(packages: Record<string, unknown>[]) {
+    return packages.map(p => {
+      const schema = p.schema as Record<string, unknown> | undefined;
+      const rubric = p.rubric as Record<string, unknown> | undefined;
+      const components = (schema?.components as Record<string, unknown>[]) || [];
+      const rules = (rubric?.rules as Record<string, unknown>[]) || [];
+      const dims = (rubric?.dimensions as string[]) || [];
+      return `# ${p.title || "未命名任务"}\n\n` +
+        `- 任务 ID: ${p.taskId}\n- 状态: ${p.status}\n- 发布时间: ${p.publishedAt || "未发布"}\n\n` +
+        `## 任务说明\n\n${p.instruction || "无"}\n\n` +
+        `## 标注模板 (${components.length} 个组件)\n\n` +
+        components.map((c, i) => `${i + 1}. **${c.label}** (${c.type}) — ${c.dataPath}`).join("\n") + "\n\n" +
+        `## 质检规则 (${rules.length} 条)\n\n` +
+        rules.map((r, i) => `${i + 1}. [${r.severity}] ${r.description}`).join("\n") + "\n\n" +
+        `## 评分维度\n\n${dims.join("、")}\n`;
+    }).join("\n---\n\n");
+  }
+
   function handleExport() {
-    const tasks = JSON.parse(localStorage.getItem("labelhub_published_tasks") || "[]");
-    const packages = tasks.map((id: string) => {
-      const data = localStorage.getItem(`labelhub_task_${id}`);
-      return data ? JSON.parse(data) : null;
-    }).filter(Boolean);
+    const packages = getTaskPackages();
+    if (packages.length === 0) { alert("暂无已保存的任务可导出"); return; }
 
-    const content = format === "json"
-      ? JSON.stringify(packages, null, 2)
-      : packages.map((p: unknown) => JSON.stringify(p)).join("\n");
+    let content: string;
+    let filename: string;
+    let mimeType: string;
 
-    const blob = new Blob([content], { type: "application/json" });
+    switch (format) {
+      case "jsonl":
+        content = packages.map(p => JSON.stringify(p)).join("\n");
+        filename = "labelhub_tasks.jsonl";
+        mimeType = "application/jsonl";
+        break;
+      case "csv":
+        content = toCSV(packages);
+        filename = "labelhub_tasks.csv";
+        mimeType = "text/csv";
+        break;
+      case "markdown":
+        content = toMarkdown(packages);
+        filename = "labelhub_tasks.md";
+        mimeType = "text/markdown";
+        break;
+      default:
+        content = JSON.stringify(packages, null, 2);
+        filename = "labelhub_tasks.json";
+        mimeType = "application/json";
+    }
+
+    const blob = new Blob([content], { type: mimeType + ";charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `labelhub_tasks.${format === "json" ? "json" : "jsonl"}`;
+    a.download = filename;
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -170,14 +227,16 @@ function ExportSettings() {
     <div className="rounded-2xl border border-primary/10 bg-white p-6 space-y-5">
       <div>
         <h2 className="text-lg font-bold text-primary">导出设置</h2>
-        <p className="mt-1 text-sm text-ink/60">导出已发布的任务包配置。</p>
+        <p className="mt-1 text-sm text-ink/60">导出已发布的任务包配置，支持多种格式。</p>
       </div>
 
       <div>
         <label className="block text-xs font-bold text-ink/60 mb-1">导出格式</label>
         <select value={format} onChange={(e) => setFormat(e.target.value)} className="w-full rounded-xl border border-primary/15 px-4 py-2.5 text-sm focus:border-accent focus:outline-none">
-          <option value="json">JSON（格式化）</option>
-          <option value="jsonl">JSONL（每行一条）</option>
+          <option value="json">JSON（格式化，B/C 模块直接消费）</option>
+          <option value="jsonl">JSONL（每行一条，适合批量处理）</option>
+          <option value="csv">CSV（表格视图，适合 Excel 查看）</option>
+          <option value="markdown">Markdown（可阅读报告，适合分享评审）</option>
         </select>
       </div>
 
@@ -188,50 +247,12 @@ function ExportSettings() {
       <div className="rounded-xl bg-surface/50 p-4">
         <p className="text-xs font-bold text-ink/40">导出说明</p>
         <ul className="mt-2 space-y-1 text-xs text-ink/60">
-          <li>导出包含所有已发布任务的完整配置</li>
-          <li>B/C 模块可直接消费导出的 JSON</li>
-          <li>编码：UTF-8</li>
+          <li><strong>JSON</strong>: 完整 TaskPackage 结构，B/C 模块可直接消费</li>
+          <li><strong>JSONL</strong>: 每行一个任务包，适合数据管线批量导入</li>
+          <li><strong>CSV</strong>: 扁平化摘要（任务名/状态/组件数/规则数），用于 Excel 或 Google Sheets</li>
+          <li><strong>Markdown</strong>: 人类可读报告格式，含标注模板和规则详情，适合飞书/钉钉分享</li>
+          <li>编码：UTF-8 BOM-free</li>
         </ul>
-      </div>
-    </div>
-  );
-}
-
-function TracesSettings() {
-  const [traces, setTraces] = useState<Array<{ id: string; op: string; time: string; status: string }>>([]);
-
-  useEffect(() => {
-    const stored = JSON.parse(localStorage.getItem("labelhub_traces") || "[]");
-    if (stored.length > 0) {
-      setTraces(stored);
-    } else {
-      setTraces([
-        { id: "trace_init", op: "平台初始化", time: new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }), status: "成功" },
-      ]);
-    }
-  }, []);
-
-  return (
-    <div className="rounded-2xl border border-primary/10 bg-white p-6">
-      <h2 className="text-lg font-bold text-primary">操作记录</h2>
-      <p className="mt-1 text-sm text-ink/60">任务创建、AI 生成和发布操作的追踪记录。</p>
-      <div className="mt-5 space-y-2">
-        {traces.length === 0 ? (
-          <p className="text-center text-sm text-ink/40 py-8">暂无操作记录</p>
-        ) : (
-          traces.map((t) => (
-            <div key={t.id} className="flex items-center justify-between rounded-xl bg-surface/50 px-4 py-2.5">
-              <div className="flex items-center gap-3">
-                <span className="font-mono text-xs text-ink/50">{t.id.slice(0, 15)}</span>
-                <span className="text-sm font-bold text-primary">{t.op}</span>
-              </div>
-              <div className="flex items-center gap-3">
-                <span className="text-xs text-ink/40">{t.time}</span>
-                <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${t.status === "成功" ? "bg-success/10 text-success" : t.status === "警告" ? "bg-warning/10 text-warning" : "bg-danger/10 text-danger"}`}>{t.status}</span>
-              </div>
-            </div>
-          ))
-        )}
       </div>
     </div>
   );

@@ -3,29 +3,31 @@
 import { useState, useEffect } from "react";
 import type { TaskStatus } from "@labelhub/contracts";
 
+const STEP_NAMES = ["数据上传", "配置模板", "质检规则", "确认发布"];
+
 const mockTasks = [
   {
     taskId: "task_text_cls_001",
     title: "客服对话情感分类",
     status: "draft" as TaskStatus,
-    progress: 5,
-    total: 10,
+    currentStep: 2,
+    totalSteps: 4,
     updatedAt: "2026-05-21 14:32"
   },
   {
     taskId: "task_ner_002",
     title: "电商评论实体抽取",
     status: "draft" as TaskStatus,
-    progress: 6,
-    total: 10,
+    currentStep: 4,
+    totalSteps: 4,
     updatedAt: "2026-05-20 09:15"
   },
   {
     taskId: "task_qa_003",
     title: "问答对质量评估",
     status: "draft" as TaskStatus,
-    progress: 2,
-    total: 10,
+    currentStep: 1,
+    totalSteps: 4,
     updatedAt: "2026-05-19 16:40"
   }
 ];
@@ -54,7 +56,7 @@ export function TaskList() {
         try {
           const pkg = JSON.parse(stored);
           if (pkg.status === "published" || pkg.publishedAt) {
-            return { ...t, status: "publishing" as TaskStatus, progress: t.total, updatedAt: pkg.publishedAt ? new Date(pkg.publishedAt).toLocaleString("zh-CN", { hour12: false }).slice(0, 16) : t.updatedAt };
+            return { ...t, status: "publishing" as TaskStatus, currentStep: 4, updatedAt: pkg.publishedAt ? new Date(pkg.publishedAt).toLocaleString("zh-CN", { hour12: false }).slice(0, 16) : t.updatedAt };
           }
         } catch { /* ignore */ }
       }
@@ -92,13 +94,13 @@ export function TaskList() {
 
             <div className="mt-4">
               <div className="flex items-center justify-between text-xs text-ink/50">
-                <span>配置进度</span>
-                <span className="font-bold text-primary">{task.progress}/{task.total}</span>
+                <span>{task.status === "publishing" ? "已发布" : `步骤 ${task.currentStep}/${task.totalSteps}`}</span>
+                <span className="font-bold text-primary">{task.status === "publishing" ? "完成" : STEP_NAMES[task.currentStep - 1]}</span>
               </div>
               <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-surface">
                 <div
                   className="h-full rounded-full bg-accent"
-                  style={{ width: `${(task.progress / task.total) * 100}%` }}
+                  style={{ width: `${(task.status === "publishing" ? 100 : (task.currentStep / task.totalSteps) * 100)}%` }}
                 />
               </div>
             </div>
