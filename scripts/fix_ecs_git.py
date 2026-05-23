@@ -1,4 +1,4 @@
-"""Quick redeploy script for LabelHub A module on ECS."""
+"""Fix ECS git after force push, then rebuild."""
 import os
 import paramiko
 import sys
@@ -11,7 +11,6 @@ PASSWORD = os.environ.get('ECS_PASSWORD', '')
 
 if not PASSWORD:
     print("ERROR: ECS_PASSWORD environment variable is required.")
-    print("Usage: ECS_PASSWORD=xxx python scripts/redeploy.py")
     sys.exit(1)
 
 
@@ -21,12 +20,13 @@ def main():
     ssh.connect(HOST, username=USER, password=PASSWORD)
 
     commands = [
-        ('git pull', 'cd /opt/labelhub-a && git pull origin feature/member-a-task-config'),
-        ('rebuild api', 'cd /opt/labelhub-a/deploy && docker compose -p labelhub_a up -d --build api 2>&1 | tail -10'),
+        ('reset to remote', 'cd /opt/labelhub-a && git fetch origin && git reset --hard origin/feature/member-a-task-config'),
+        ('ensure .env exists', 'test -f /opt/labelhub-a/deploy/.env || echo "DEEPSEEK_API_KEY=\nDEEPSEEK_BASE_URL=https://api.deepseek.com" > /opt/labelhub-a/deploy/.env'),
+        ('rebuild api', 'cd /opt/labelhub-a/deploy && docker compose -p labelhub_a up -d --build api 2>&1 | tail -15'),
         ('rebuild web', 'cd /opt/labelhub-a/deploy && docker compose -p labelhub_a up -d --build web 2>&1 | tail -10'),
-        ('health: api', 'sleep 5 && curl -s http://localhost:8080/api/tasks/health'),
-        ('health: web', 'curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/'),
+        ('health: api', 'sleep 8 && curl -s http://localhost:8080/api/tasks/health'),
         ('health: deepseek', 'curl -s http://localhost:8080/agents/health'),
+        ('health: web', 'curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/'),
     ]
 
     for label, cmd in commands:
