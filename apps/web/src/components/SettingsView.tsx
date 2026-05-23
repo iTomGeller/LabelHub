@@ -1,9 +1,10 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import { SubTabs } from "./SubTabs";
 
 const TABS = [
-  { key: "agents", label: "AI 助手配置" },
+  { key: "ai", label: "AI 助手配置" },
   { key: "export", label: "导出设置" },
   { key: "traces", label: "链路追踪" }
 ];
@@ -13,20 +14,16 @@ export function SettingsView() {
     <div className="space-y-5">
       <div>
         <h1 className="font-display text-3xl font-bold text-primary">系统设置</h1>
-        <p className="mt-1 text-sm text-ink/60">AI 助手配置、导出格式和链路追踪记录。</p>
+        <p className="mt-1 text-sm text-ink/60">AI 连接配置、任务包导出和操作记录。</p>
       </div>
 
-      <SubTabs tabs={TABS} defaultTab="agents">
+      <SubTabs tabs={TABS} defaultTab="ai">
         {(tab) => {
           switch (tab) {
-            case "agents":
-              return <AgentsSettings />;
-            case "export":
-              return <ExportSettings />;
-            case "traces":
-              return <TracesSettings />;
-            default:
-              return null;
+            case "ai": return <AiSettings />;
+            case "export": return <ExportSettings />;
+            case "traces": return <TracesSettings />;
+            default: return null;
           }
         }}
       </SubTabs>
@@ -34,89 +31,222 @@ export function SettingsView() {
   );
 }
 
-function AgentsSettings() {
-  const agents = [
-    { name: "模板生成助手", model: "gpt-4o", status: "就绪", calls: 5 },
-    { name: "指令优化助手", model: "gpt-4o", status: "就绪", calls: 3 },
-    { name: "风险检查助手", model: "gpt-4o-mini", status: "就绪", calls: 4 }
-  ];
+function AiSettings() {
+  const [apiKey, setApiKey] = useState("");
+  const [model, setModel] = useState("deepseek-chat");
+  const [saved, setSaved] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<{ ok: boolean; msg: string } | null>(null);
+
+  useEffect(() => {
+    const stored = localStorage.getItem("labelhub_ai_config");
+    if (stored) {
+      try {
+        const parsed = JSON.parse(stored);
+        setApiKey(parsed.apiKey || "");
+        setModel(parsed.model || "deepseek-chat");
+      } catch { /* ignore */ }
+    }
+  }, []);
+
+  function handleSave() {
+    localStorage.setItem("labelhub_ai_config", JSON.stringify({ apiKey, model }));
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  }
+
+  async function handleTest() {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const res = await fetch("/agent-api/health");
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setTestResult({
+        ok: data.status === "ok" && data.api_key_set === "yes",
+        msg: data.api_key_set === "yes"
+          ? `连接成功 — 模型: ${data.model}`
+          : "服务在线但 API Key 未配置（需在服务端 .env 中设置）"
+      });
+    } catch (e) {
+      setTestResult({ ok: false, msg: `连接失败: ${e instanceof Error ? e.message : "未知错误"}` });
+    } finally {
+      setTesting(false);
+    }
+  }
 
   return (
-    <div className="rounded-2xl border border-primary/10 bg-white p-6">
-      <h2 className="text-lg font-bold text-primary">AI 助手</h2>
-      <p className="mt-1 text-sm text-ink/60">配置各助手的模型偏好和工具权限。</p>
-      <div className="mt-5 space-y-3">
-        {agents.map((a) => (
-          <div key={a.name} className="flex items-center justify-between rounded-xl border border-primary/10 bg-surface/50 px-4 py-3">
-            <div>
-              <p className="text-sm font-bold text-primary">{a.name}</p>
-              <p className="text-xs text-ink/50">模型: {a.model} · 调用 {a.calls} 次</p>
-            </div>
-            <span className="rounded-full bg-success/10 px-2.5 py-1 text-xs font-bold text-success">{a.status}</span>
+    <div className="rounded-2xl border border-primary/10 bg-white p-6 space-y-6">
+      <div>
+        <h2 className="text-lg font-bold text-primary">DeepSeek AI 配置</h2>
+        <p className="mt-1 text-sm text-ink/60">配置 AI 一键生成功能所使用的模型和密钥。</p>
+      </div>
+
+      <div className="space-y-4">
+        <div>
+          <label className="block text-xs font-bold text-ink/60 mb-1">API Key</label>
+          <input
+            type="password"
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+            placeholder="sk-..."
+            className="w-full rounded-xl border border-primary/15 px-4 py-2.5 text-sm font-mono focus:border-accent focus:outline-none"
+          />
+          <p className="mt-1 text-xs text-ink/40">此密钥存储在浏览器本地。服务端密钥通过环境变量 DEEPSEEK_API_KEY 配置。</p>
+        </div>
+
+        <div>
+          <label className="block text-xs font-bold text-ink/60 mb-1">模型</label>
+          <select value={model} onChange={(e) => setModel(e.target.value)} className="w-full rounded-xl border border-primary/15 px-4 py-2.5 text-sm focus:border-accent focus:outline-none">
+            <option value="deepseek-chat">DeepSeek Chat（推荐）</option>
+            <option value="deepseek-coder">DeepSeek Coder</option>
+            <option value="deepseek-reasoner">DeepSeek Reasoner</option>
+          </select>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <button onClick={handleSave} className="rounded-xl bg-accent px-5 py-2.5 text-sm font-bold text-white hover:bg-accent/90">
+            {saved ? "已保存" : "保存配置"}
+          </button>
+          <button onClick={handleTest} disabled={testing} className="rounded-xl border border-accent px-5 py-2.5 text-sm font-bold text-accent hover:bg-accent/5 disabled:opacity-50">
+            {testing ? "测试中…" : "测试连接"}
+          </button>
+        </div>
+
+        {testResult && (
+          <div className={`rounded-xl border px-4 py-3 text-sm ${testResult.ok ? "border-success/30 bg-success/5 text-success" : "border-danger/30 bg-danger/5 text-danger"}`}>
+            {testResult.ok ? "✓ " : "✕ "}{testResult.msg}
           </div>
-        ))}
+        )}
+      </div>
+
+      <div className="border-t border-primary/10 pt-4">
+        <h3 className="text-sm font-bold text-primary">运行状态</h3>
+        <div className="mt-3 grid gap-2 md:grid-cols-3">
+          <StatusCard label="后端服务" endpoint="/agent-api/health" field="status" />
+          <StatusCard label="API Key" endpoint="/agent-api/health" field="api_key_set" />
+          <StatusCard label="模型" endpoint="/agent-api/health" field="model" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StatusCard({ label, endpoint, field }: { label: string; endpoint: string; field: string }) {
+  const [value, setValue] = useState<string>("加载中…");
+  const [ok, setOk] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    fetch(endpoint)
+      .then((r) => r.json())
+      .then((data) => {
+        const v = data[field] || "未知";
+        setValue(v);
+        setOk(v === "ok" || v === "yes" || (field === "model" && v.length > 0));
+      })
+      .catch(() => { setValue("离线"); setOk(false); });
+  }, [endpoint, field]);
+
+  return (
+    <div className="rounded-xl border border-primary/10 bg-surface/50 px-4 py-3">
+      <p className="text-xs font-bold text-ink/40">{label}</p>
+      <div className="mt-1 flex items-center gap-2">
+        {ok !== null && <span className={`h-2 w-2 rounded-full ${ok ? "bg-success" : "bg-danger"}`} />}
+        <span className="text-sm font-bold text-primary">{value}</span>
       </div>
     </div>
   );
 }
 
 function ExportSettings() {
-  const settings = [
-    { label: "默认格式", value: "JSONL" },
-    { label: "编码", value: "UTF-8" },
-    { label: "CSV 分隔符", value: "逗号 (,)" },
-    { label: "空值处理", value: "输出 null" },
-    { label: "字段映射", value: "6 个映射规则" }
-  ];
+  const [format, setFormat] = useState("json");
+
+  function handleExport() {
+    const tasks = JSON.parse(localStorage.getItem("labelhub_published_tasks") || "[]");
+    const packages = tasks.map((id: string) => {
+      const data = localStorage.getItem(`labelhub_task_${id}`);
+      return data ? JSON.parse(data) : null;
+    }).filter(Boolean);
+
+    const content = format === "json"
+      ? JSON.stringify(packages, null, 2)
+      : packages.map((p: unknown) => JSON.stringify(p)).join("\n");
+
+    const blob = new Blob([content], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `labelhub_tasks.${format === "json" ? "json" : "jsonl"}`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
 
   return (
-    <div className="rounded-2xl border border-primary/10 bg-white p-6">
-      <h2 className="text-lg font-bold text-primary">导出设置</h2>
-      <p className="mt-1 text-sm text-ink/60">配置默认导出格式、编码和字段映射。</p>
-      <div className="mt-5 grid gap-3 md:grid-cols-2">
-        {settings.map((s) => (
-          <div key={s.label} className="rounded-xl border border-primary/10 bg-surface/50 px-4 py-3">
-            <p className="text-xs font-bold text-ink/40">{s.label}</p>
-            <p className="mt-0.5 text-sm font-bold text-primary">{s.value}</p>
-          </div>
-        ))}
+    <div className="rounded-2xl border border-primary/10 bg-white p-6 space-y-5">
+      <div>
+        <h2 className="text-lg font-bold text-primary">导出设置</h2>
+        <p className="mt-1 text-sm text-ink/60">导出已发布的任务包配置。</p>
+      </div>
+
+      <div>
+        <label className="block text-xs font-bold text-ink/60 mb-1">导出格式</label>
+        <select value={format} onChange={(e) => setFormat(e.target.value)} className="w-full rounded-xl border border-primary/15 px-4 py-2.5 text-sm focus:border-accent focus:outline-none">
+          <option value="json">JSON（格式化）</option>
+          <option value="jsonl">JSONL（每行一条）</option>
+        </select>
+      </div>
+
+      <div className="flex items-center gap-3">
+        <button onClick={handleExport} className="rounded-xl bg-accent px-5 py-2.5 text-sm font-bold text-white hover:bg-accent/90">导出所有任务包</button>
+      </div>
+
+      <div className="rounded-xl bg-surface/50 p-4">
+        <p className="text-xs font-bold text-ink/40">导出说明</p>
+        <ul className="mt-2 space-y-1 text-xs text-ink/60">
+          <li>导出包含所有已发布任务的完整配置</li>
+          <li>B/C 模块可直接消费导出的 JSON</li>
+          <li>编码：UTF-8</li>
+        </ul>
       </div>
     </div>
   );
 }
 
 function TracesSettings() {
-  const traces = [
-    { id: "trace_create_001", op: "创建任务", status: "成功", dur: "120ms", time: "14:32" },
-    { id: "trace_save_002", op: "保存模板", status: "成功", dur: "85ms", time: "14:30" },
-    { id: "trace_import_003", op: "数据导入", status: "警告", dur: "2.4s", time: "14:28" },
-    { id: "trace_publish_004", op: "发布任务包", status: "成功", dur: "340ms", time: "14:25" },
-    { id: "trace_agent_005", op: "Agent 模板生成", status: "成功", dur: "3.1s", time: "14:20" },
-    { id: "trace_risk_006", op: "Agent 风险检查", status: "失败", dur: "900ms", time: "14:18" }
-  ];
+  const [traces, setTraces] = useState<Array<{ id: string; op: string; time: string; status: string }>>([]);
+
+  useEffect(() => {
+    const stored = JSON.parse(localStorage.getItem("labelhub_traces") || "[]");
+    if (stored.length > 0) {
+      setTraces(stored);
+    } else {
+      setTraces([
+        { id: "trace_init", op: "平台初始化", time: new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }), status: "成功" },
+      ]);
+    }
+  }, []);
 
   return (
     <div className="rounded-2xl border border-primary/10 bg-white p-6">
-      <h2 className="text-lg font-bold text-primary">链路追踪</h2>
-      <p className="mt-1 text-sm text-ink/60">任务创建、模板保存、导入、发布和 Agent 调用追踪。</p>
+      <h2 className="text-lg font-bold text-primary">操作记录</h2>
+      <p className="mt-1 text-sm text-ink/60">任务创建、AI 生成和发布操作的追踪记录。</p>
       <div className="mt-5 space-y-2">
-        {traces.map((t) => (
-          <div key={t.id} className="flex items-center justify-between rounded-xl bg-surface/50 px-4 py-2.5">
-            <div className="flex items-center gap-3">
-              <span className="font-mono text-xs text-ink/50">{t.id}</span>
-              <span className="text-sm font-bold text-primary">{t.op}</span>
+        {traces.length === 0 ? (
+          <p className="text-center text-sm text-ink/40 py-8">暂无操作记录</p>
+        ) : (
+          traces.map((t) => (
+            <div key={t.id} className="flex items-center justify-between rounded-xl bg-surface/50 px-4 py-2.5">
+              <div className="flex items-center gap-3">
+                <span className="font-mono text-xs text-ink/50">{t.id.slice(0, 15)}</span>
+                <span className="text-sm font-bold text-primary">{t.op}</span>
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-ink/40">{t.time}</span>
+                <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${t.status === "成功" ? "bg-success/10 text-success" : t.status === "警告" ? "bg-warning/10 text-warning" : "bg-danger/10 text-danger"}`}>{t.status}</span>
+              </div>
             </div>
-            <div className="flex items-center gap-3">
-              <span className="text-xs text-ink/40">{t.dur}</span>
-              <span className="text-xs text-ink/40">{t.time}</span>
-              <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${
-                t.status === "成功" ? "bg-success/10 text-success" :
-                t.status === "警告" ? "bg-warning/10 text-warning" :
-                "bg-danger/10 text-danger"
-              }`}>{t.status}</span>
-            </div>
-          </div>
-        ))}
+          ))
+        )}
       </div>
     </div>
   );
