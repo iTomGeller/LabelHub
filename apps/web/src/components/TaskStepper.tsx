@@ -497,10 +497,10 @@ function StepTemplate({ config, setConfig }: { config: TaskConfig; setConfig: Re
 function PropsEditor({ component, idx, updateProps }: { component: SchemaComponent; idx: number; updateProps: (idx: number, p: Record<string, unknown>) => void }) {
   const type = component.type;
   const props = component.props;
+  const [newOpt, setNewOpt] = useState("");
 
   if (type === "singleChoice" || type === "multiChoice" || type === "tagSelect") {
     const options = (props.options as string[]) || [];
-    const [newOpt, setNewOpt] = useState("");
     return (
       <div className="rounded-lg border border-primary/10 bg-surface/50 p-3 space-y-2">
         <p className="text-xs font-bold text-ink/60">选项列表</p>
