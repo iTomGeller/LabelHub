@@ -27,6 +27,14 @@ public class AiGenerateController {
         );
     }
 
+    @GetMapping("/metrics-summary")
+    public Map<String, String> metricsSummary() {
+        return Map.of(
+                "calls", String.valueOf(deepSeekService.getTotalCalls()),
+                "latency", deepSeekService.getAverageLatency()
+        );
+    }
+
     public record GenerateRequest(
             String taskId,
             String taskName,

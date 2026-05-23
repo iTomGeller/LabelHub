@@ -3,6 +3,9 @@ package com.labelhub.task.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -13,6 +16,7 @@ import org.springframework.web.reactive.function.client.WebClient;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
 
 @Service
 public class DeepSeekService {
@@ -23,15 +27,37 @@ public class DeepSeekService {
     private final String model;
     private final boolean enabled;
 
+    private final Counter callsSuccess;
+    private final Counter callsFallback;
+    private final Counter callsError;
+    private final Timer callLatency;
+    private final Counter tokensUsed;
+    private final AtomicLong totalCalls = new AtomicLong(0);
+    private final AtomicLong totalLatencyMs = new AtomicLong(0);
+
     public DeepSeekService(
             @Value("${deepseek.api-key:}") String apiKey,
             @Value("${deepseek.base-url:https://api.deepseek.com}") String baseUrl,
             @Value("${deepseek.model:deepseek-chat}") String model,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            MeterRegistry meterRegistry
     ) {
         this.model = model;
         this.objectMapper = objectMapper;
         this.enabled = apiKey != null && !apiKey.isBlank();
+
+        this.callsSuccess = Counter.builder("deepseek.calls")
+                .tag("outcome", "success").register(meterRegistry);
+        this.callsFallback = Counter.builder("deepseek.calls")
+                .tag("outcome", "fallback").register(meterRegistry);
+        this.callsError = Counter.builder("deepseek.calls")
+                .tag("outcome", "error").register(meterRegistry);
+        this.callLatency = Timer.builder("deepseek.latency")
+                .description("DeepSeek API call latency")
+                .register(meterRegistry);
+        this.tokensUsed = Counter.builder("deepseek.tokens")
+                .description("Total tokens consumed")
+                .register(meterRegistry);
 
         this.webClient = WebClient.builder()
                 .baseUrl(baseUrl)
@@ -63,9 +89,19 @@ public class DeepSeekService {
             String rationale
     ) {}
 
+    public long getTotalCalls() { return totalCalls.get(); }
+
+    public String getAverageLatency() {
+        long calls = totalCalls.get();
+        if (calls == 0) return "N/A";
+        return (totalLatencyMs.get() / calls) + "ms";
+    }
+
     public GenerateTaskConfigResponse generateTaskConfig(GenerateTaskConfigRequest request) {
         if (!enabled) {
             log.warn("DeepSeek API key not configured, returning fallback config");
+            callsFallback.increment();
+            totalCalls.incrementAndGet();
             return fallbackConfig(request);
         }
 
@@ -105,6 +141,7 @@ public class DeepSeekService {
                 samplePreview
         );
 
+        long startMs = System.currentTimeMillis();
         try {
             Map<String, Object> body = Map.of(
                     "model", model,
@@ -126,10 +163,23 @@ public class DeepSeekService {
                     .timeout(Duration.ofSeconds(30))
                     .block();
 
+            long elapsed = System.currentTimeMillis() - startMs;
+            callLatency.record(Duration.ofMillis(elapsed));
+            totalLatencyMs.addAndGet(elapsed);
+            totalCalls.incrementAndGet();
+
             JsonNode root = objectMapper.readTree(responseBody);
+
+            JsonNode usage = root.path("usage");
+            if (!usage.isMissingNode()) {
+                int total = usage.path("total_tokens").asInt(0);
+                if (total > 0) tokensUsed.increment(total);
+            }
+
             String content = root.path("choices").path(0).path("message").path("content").asText("{}");
             JsonNode result = objectMapper.readTree(content);
 
+            callsSuccess.increment();
             return new GenerateTaskConfigResponse(
                     request.taskId(),
                     parseListOfMaps(result, "schemaComponents"),
@@ -140,6 +190,12 @@ public class DeepSeekService {
                     result.path("rationale").asText("已生成配置")
             );
         } catch (Exception e) {
+            long elapsed = System.currentTimeMillis() - startMs;
+            callLatency.record(Duration.ofMillis(elapsed));
+            totalLatencyMs.addAndGet(elapsed);
+            totalCalls.incrementAndGet();
+            callsError.increment();
+
             log.error("DeepSeek API call failed: {}", e.getMessage(), e);
             var fallback = fallbackConfig(request);
             return new GenerateTaskConfigResponse(

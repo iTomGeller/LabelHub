@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { SubTabs } from "./SubTabs";
 
 const TABS = [
-  { key: "ai", label: "AI 助手配置" },
+  { key: "ai", label: "AI 服务状态" },
   { key: "export", label: "导出设置" },
   { key: "traces", label: "链路追踪" }
 ];
@@ -14,7 +14,7 @@ export function SettingsView() {
     <div className="space-y-5">
       <div>
         <h1 className="font-display text-3xl font-bold text-primary">系统设置</h1>
-        <p className="mt-1 text-sm text-ink/60">AI 连接配置、任务包导出和操作记录。</p>
+        <p className="mt-1 text-sm text-ink/60">AI 服务监控、任务包导出和操作记录。</p>
       </div>
 
       <SubTabs tabs={TABS} defaultTab="ai">
@@ -32,41 +32,29 @@ export function SettingsView() {
 }
 
 function AiSettings() {
-  const [apiKey, setApiKey] = useState("");
-  const [model, setModel] = useState("deepseek-chat");
-  const [saved, setSaved] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; msg: string } | null>(null);
+  const [metrics, setMetrics] = useState<{ calls: string; latency: string } | null>(null);
 
   useEffect(() => {
-    const stored = localStorage.getItem("labelhub_ai_config");
-    if (stored) {
-      try {
-        const parsed = JSON.parse(stored);
-        setApiKey(parsed.apiKey || "");
-        setModel(parsed.model || "deepseek-chat");
-      } catch { /* ignore */ }
-    }
+    fetch("/agent-api/agents/metrics-summary")
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => { if (data) setMetrics(data); })
+      .catch(() => {});
   }, []);
-
-  function handleSave() {
-    localStorage.setItem("labelhub_ai_config", JSON.stringify({ apiKey, model }));
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
-  }
 
   async function handleTest() {
     setTesting(true);
     setTestResult(null);
     try {
-      const res = await fetch("/agent-api/health");
+      const res = await fetch("/agent-api/agents/health");
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setTestResult({
         ok: data.status === "ok" && data.api_key_set === "yes",
         msg: data.api_key_set === "yes"
-          ? `连接成功 — 模型: ${data.model}`
-          : "服务在线但 API Key 未配置（需在服务端 .env 中设置）"
+          ? `连接正常 — 模型: ${data.model}，API Key 已配置`
+          : "服务在线但 API Key 未配置（联系管理员在服务端环境变量中设置）"
       });
     } catch (e) {
       setTestResult({ ok: false, msg: `连接失败: ${e instanceof Error ? e.message : "未知错误"}` });
@@ -78,55 +66,51 @@ function AiSettings() {
   return (
     <div className="rounded-2xl border border-primary/10 bg-white p-6 space-y-6">
       <div>
-        <h2 className="text-lg font-bold text-primary">DeepSeek AI 配置</h2>
-        <p className="mt-1 text-sm text-ink/60">配置 AI 一键生成功能所使用的模型和密钥。</p>
+        <h2 className="text-lg font-bold text-primary">DeepSeek AI 服务状态</h2>
+        <p className="mt-1 text-sm text-ink/60">AI 一键生成功能由服务端 DeepSeek API 驱动，无需手动配置。</p>
       </div>
 
-      <div className="space-y-4">
-        <div>
-          <label className="block text-xs font-bold text-ink/60 mb-1">API Key</label>
-          <input
-            type="password"
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-            placeholder="sk-..."
-            className="w-full rounded-xl border border-primary/15 px-4 py-2.5 text-sm font-mono focus:border-accent focus:outline-none"
-          />
-          <p className="mt-1 text-xs text-ink/40">此密钥存储在浏览器本地。服务端密钥通过环境变量 DEEPSEEK_API_KEY 配置。</p>
-        </div>
+      <div className="grid gap-3 md:grid-cols-3">
+        <StatusCard label="服务状态" endpoint="/agent-api/agents/health" field="status" />
+        <StatusCard label="API Key" endpoint="/agent-api/agents/health" field="api_key_set" />
+        <StatusCard label="当前模型" endpoint="/agent-api/agents/health" field="model" />
+      </div>
 
-        <div>
-          <label className="block text-xs font-bold text-ink/60 mb-1">模型</label>
-          <select value={model} onChange={(e) => setModel(e.target.value)} className="w-full rounded-xl border border-primary/15 px-4 py-2.5 text-sm focus:border-accent focus:outline-none">
-            <option value="deepseek-chat">DeepSeek Chat（推荐）</option>
-            <option value="deepseek-coder">DeepSeek Coder</option>
-            <option value="deepseek-reasoner">DeepSeek Reasoner</option>
-          </select>
-        </div>
-
-        <div className="flex items-center gap-3">
-          <button onClick={handleSave} className="rounded-xl bg-accent px-5 py-2.5 text-sm font-bold text-white hover:bg-accent/90">
-            {saved ? "已保存" : "保存配置"}
-          </button>
-          <button onClick={handleTest} disabled={testing} className="rounded-xl border border-accent px-5 py-2.5 text-sm font-bold text-accent hover:bg-accent/5 disabled:opacity-50">
-            {testing ? "测试中…" : "测试连接"}
-          </button>
-        </div>
-
-        {testResult && (
-          <div className={`rounded-xl border px-4 py-3 text-sm ${testResult.ok ? "border-success/30 bg-success/5 text-success" : "border-danger/30 bg-danger/5 text-danger"}`}>
-            {testResult.ok ? "✓ " : "✕ "}{testResult.msg}
+      {metrics && (
+        <div className="grid gap-3 md:grid-cols-2">
+          <div className="rounded-xl border border-primary/10 bg-surface/50 px-4 py-3">
+            <p className="text-xs font-bold text-ink/40">总调用次数</p>
+            <p className="mt-1 text-lg font-bold text-primary">{metrics.calls}</p>
           </div>
-        )}
+          <div className="rounded-xl border border-primary/10 bg-surface/50 px-4 py-3">
+            <p className="text-xs font-bold text-ink/40">平均延迟</p>
+            <p className="mt-1 text-lg font-bold text-primary">{metrics.latency}</p>
+          </div>
+        </div>
+      )}
+
+      <div className="flex items-center gap-3">
+        <button onClick={handleTest} disabled={testing} className="rounded-xl border border-accent px-5 py-2.5 text-sm font-bold text-accent hover:bg-accent/5 disabled:opacity-50">
+          {testing ? "测试中…" : "测试连接"}
+        </button>
+        <a href="/grafana/" target="_blank" rel="noopener" className="rounded-xl border border-primary/15 px-5 py-2.5 text-sm font-bold text-primary hover:bg-surface/50">
+          打开监控面板
+        </a>
       </div>
 
-      <div className="border-t border-primary/10 pt-4">
-        <h3 className="text-sm font-bold text-primary">运行状态</h3>
-        <div className="mt-3 grid gap-2 md:grid-cols-3">
-          <StatusCard label="后端服务" endpoint="/agent-api/health" field="status" />
-          <StatusCard label="API Key" endpoint="/agent-api/health" field="api_key_set" />
-          <StatusCard label="模型" endpoint="/agent-api/health" field="model" />
+      {testResult && (
+        <div className={`rounded-xl border px-4 py-3 text-sm ${testResult.ok ? "border-success/30 bg-success/5 text-success" : "border-danger/30 bg-danger/5 text-danger"}`}>
+          {testResult.ok ? "\u2713 " : "\u2715 "}{testResult.msg}
         </div>
+      )}
+
+      <div className="rounded-xl bg-surface/50 p-4">
+        <p className="text-xs font-bold text-ink/40">说明</p>
+        <ul className="mt-2 space-y-1 text-xs text-ink/60">
+          <li>DeepSeek API Key 通过服务端环境变量配置，前端无需操作</li>
+          <li>创建任务时点击 AI 一键配置 即可自动生成标注方案</li>
+          <li>详细监控数据请访问 Grafana 看板</li>
+        </ul>
       </div>
     </div>
   );
@@ -138,10 +122,11 @@ function StatusCard({ label, endpoint, field }: { label: string; endpoint: strin
 
   useEffect(() => {
     fetch(endpoint)
-      .then((r) => r.json())
+      .then((r) => { if (!r.ok) throw new Error("offline"); return r.json(); })
       .then((data) => {
         const v = data[field] || "未知";
-        setValue(v);
+        const display = v === "ok" ? "正常" : v === "yes" ? "已配置" : v === "no" ? "未配置" : v;
+        setValue(display);
         setOk(v === "ok" || v === "yes" || (field === "model" && v.length > 0));
       })
       .catch(() => { setValue("离线"); setOk(false); });

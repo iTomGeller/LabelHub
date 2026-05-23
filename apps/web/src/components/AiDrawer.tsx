@@ -12,8 +12,8 @@ export function AiDrawer() {
   useEffect(() => {
     if (!open) return;
     setHealthError(null);
-    fetch("/agent-api/health")
-      .then((r) => r.json())
+    fetch("/agent-api/agents/health")
+      .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
       .then(setHealth)
       .catch((e) => setHealthError(e.message));
   }, [open]);
@@ -106,8 +106,8 @@ export function AiDrawer() {
                   <p className="text-xs text-ink/50">进入 4 步任务配置流程</p>
                 </a>
                 <a href="/?view=settings" className="block rounded-xl border border-primary/10 bg-surface/30 px-4 py-3 hover:border-accent transition">
-                  <p className="text-sm font-bold text-primary">AI 配置管理</p>
-                  <p className="text-xs text-ink/50">修改 API Key、模型偏好</p>
+                  <p className="text-sm font-bold text-primary">查看 AI 状态</p>
+                  <p className="text-xs text-ink/50">服务状态、调用统计、监控看板</p>
                 </a>
               </div>
             </section>
