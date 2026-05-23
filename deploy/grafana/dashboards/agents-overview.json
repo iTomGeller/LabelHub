@@ -1,0 +1,217 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 100,
+      "title": "Agent 调用总览",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "thresholds": { "steps": [{"color": "green", "value": null}] } } },
+      "gridPos": { "h": 4, "w": 5, "x": 0, "y": 1 },
+      "id": 1,
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "title": "配置生成 Agent 调用",
+      "type": "stat",
+      "targets": [{ "expr": "sum(agent_invocations_total{agent=\"config-gen\"})", "legendFormat": "config-gen" }]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "thresholds": { "steps": [{"color": "green", "value": null}] } } },
+      "gridPos": { "h": 4, "w": 5, "x": 5, "y": 1 },
+      "id": 2,
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "title": "Schema 风险 Agent 调用",
+      "type": "stat",
+      "targets": [{ "expr": "sum(agent_invocations_total{agent=\"schema-risk\"})", "legendFormat": "schema-risk" }]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "thresholds": { "steps": [{"color": "green", "value": null}] } } },
+      "gridPos": { "h": 4, "w": 5, "x": 10, "y": 1 },
+      "id": 3,
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "title": "数据集画像 Agent 调用",
+      "type": "stat",
+      "targets": [{ "expr": "sum(agent_invocations_total{agent=\"dataset-profile\"})", "legendFormat": "dataset-profile" }]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "thresholds": { "steps": [{"color": "green", "value": null}] } } },
+      "gridPos": { "h": 4, "w": 5, "x": 15, "y": 1 },
+      "id": 4,
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "title": "发布检查 Agent 调用",
+      "type": "stat",
+      "targets": [{ "expr": "sum(agent_invocations_total{agent=\"publish-check\"})", "legendFormat": "publish-check" }]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "thresholds": { "steps": [{"color": "green", "value": null}] } } },
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 1 },
+      "id": 5,
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "title": "预审 Agent 调用",
+      "type": "stat",
+      "targets": [{ "expr": "sum(agent_invocations_total{agent=\"precheck\"})", "legendFormat": "precheck" }]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1, "thresholds": { "steps": [{"color": "red", "value": null}, {"color": "orange", "value": 0.8}, {"color": "green", "value": 0.95}] } } },
+      "gridPos": { "h": 4, "w": 8, "x": 0, "y": 5 },
+      "id": 6,
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "showThresholdLabels": false },
+      "title": "配置生成 成功率",
+      "type": "gauge",
+      "targets": [{ "expr": "sum(agent_invocations_total{agent=\"config-gen\",outcome=\"success\"}) / sum(agent_invocations_total{agent=\"config-gen\"})", "legendFormat": "success_rate" }]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1, "thresholds": { "steps": [{"color": "red", "value": null}, {"color": "orange", "value": 0.8}, {"color": "green", "value": 0.95}] } } },
+      "gridPos": { "h": 4, "w": 8, "x": 8, "y": 5 },
+      "id": 7,
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "showThresholdLabels": false },
+      "title": "Schema 风险 成功率",
+      "type": "gauge",
+      "targets": [{ "expr": "sum(agent_invocations_total{agent=\"schema-risk\",outcome=\"success\"}) / sum(agent_invocations_total{agent=\"schema-risk\"})", "legendFormat": "success_rate" }]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "custom": { "lineWidth": 2 } } },
+      "gridPos": { "h": 4, "w": 8, "x": 16, "y": 5 },
+      "id": 8,
+      "title": "Agent 总调用 QPS",
+      "type": "timeseries",
+      "targets": [{ "expr": "sum(rate(agent_invocations_total[5m])) by (agent)", "legendFormat": "{{agent}}" }]
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 9 },
+      "id": 101,
+      "title": "Agent 延迟对比",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s", "custom": { "lineWidth": 2 } } },
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 10 },
+      "id": 9,
+      "title": "各 Agent 平均延迟",
+      "type": "timeseries",
+      "targets": [{ "expr": "rate(agent_latency_seconds_sum[5m]) / rate(agent_latency_seconds_count[5m])", "legendFormat": "{{agent}}" }]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s", "custom": { "lineWidth": 2 } } },
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 10 },
+      "id": 10,
+      "title": "配置生成 延迟分位 (p50/p95/p99)",
+      "type": "timeseries",
+      "targets": [
+        { "expr": "histogram_quantile(0.5, sum(rate(agent_latency_seconds_bucket{agent=\"config-gen\"}[5m])) by (le))", "legendFormat": "p50" },
+        { "expr": "histogram_quantile(0.95, sum(rate(agent_latency_seconds_bucket{agent=\"config-gen\"}[5m])) by (le))", "legendFormat": "p95" },
+        { "expr": "histogram_quantile(0.99, sum(rate(agent_latency_seconds_bucket{agent=\"config-gen\"}[5m])) by (le))", "legendFormat": "p99" }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s", "custom": { "lineWidth": 2 } } },
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 10 },
+      "id": 11,
+      "title": "Schema 风险 Agent 延迟",
+      "type": "timeseries",
+      "targets": [{ "expr": "rate(agent_latency_seconds_sum{agent=\"schema-risk\"}[5m]) / rate(agent_latency_seconds_count{agent=\"schema-risk\"}[5m])", "legendFormat": "avg" }]
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 17 },
+      "id": 102,
+      "title": "Agent 交互链路",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": {} },
+      "gridPos": { "h": 6, "w": 10, "x": 0, "y": 18 },
+      "id": 12,
+      "title": "Agent 调用链热力图",
+      "type": "table",
+      "targets": [{ "expr": "sum(agent_chain_total) by (from, to)", "legendFormat": "{{from}} → {{to}}", "format": "table", "instant": true }],
+      "transformations": [{ "id": "organize", "options": { "excludeByName": { "Time": true } } }]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "thresholds": { "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}] } } },
+      "gridPos": { "h": 6, "w": 6, "x": 10, "y": 18 },
+      "id": 13,
+      "options": { "colorMode": "background", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "title": "级联失败计数",
+      "type": "stat",
+      "targets": [{ "expr": "sum(agent_cascade_failure_total) by (agent)", "legendFormat": "{{agent}}" }]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "custom": { "lineWidth": 2 } } },
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 18 },
+      "id": 14,
+      "title": "Agent 降级率",
+      "type": "timeseries",
+      "targets": [{ "expr": "sum(rate(agent_invocations_total{outcome=\"fallback\"}[5m])) by (agent)", "legendFormat": "{{agent}}" }]
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 24 },
+      "id": 103,
+      "title": "Agent 置信度与 Token",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "custom": { "lineWidth": 2 } } },
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 25 },
+      "id": 15,
+      "title": "配置生成 置信度分布",
+      "type": "timeseries",
+      "targets": [
+        { "expr": "agent_confidence_sum{agent=\"config-gen\"} / agent_confidence_count{agent=\"config-gen\"}", "legendFormat": "avg confidence" },
+        { "expr": "histogram_quantile(0.5, sum(rate(agent_confidence_bucket{agent=\"config-gen\"}[5m])) by (le))", "legendFormat": "p50" }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1, "thresholds": { "steps": [{"color": "red", "value": null}, {"color": "orange", "value": 0.7}, {"color": "green", "value": 0.9}] } } },
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 25 },
+      "id": 16,
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "title": "预审 Agent 自动通过率",
+      "type": "gauge",
+      "targets": [{ "expr": "sum(agent_invocations_total{agent=\"precheck\",outcome=\"success\"}) / sum(agent_invocations_total{agent=\"precheck\"})", "legendFormat": "auto_pass_rate" }]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "lineWidth": 2 } } },
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 25 },
+      "id": 17,
+      "title": "Token 消耗速率 (by Agent)",
+      "type": "timeseries",
+      "targets": [
+        { "expr": "rate(deepseek_tokens_total[5m])", "legendFormat": "config-gen (deepseek)" },
+        { "expr": "sum(rate(agent_invocations_total{agent=\"config-gen\"}[5m])) * 2000", "legendFormat": "estimated tokens/s" }
+      ]
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["labelhub", "agents"],
+  "templating": { "list": [] },
+  "time": { "from": "now-1h", "to": "now" },
+  "title": "LabelHub - Agent 全景",
+  "uid": "labelhub-agents-overview"
+}

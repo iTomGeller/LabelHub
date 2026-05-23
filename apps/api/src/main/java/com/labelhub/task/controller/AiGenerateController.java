@@ -1,5 +1,6 @@
 package com.labelhub.task.controller;
 
+import com.labelhub.task.service.AgentMetrics;
 import com.labelhub.task.service.DeepSeekService;
 import com.labelhub.task.service.DeepSeekService.GenerateTaskConfigRequest;
 import com.labelhub.task.service.DeepSeekService.GenerateTaskConfigResponse;
@@ -13,9 +14,11 @@ import java.util.Map;
 @RequestMapping("/agents")
 public class AiGenerateController {
     private final DeepSeekService deepSeekService;
+    private final AgentMetrics agentMetrics;
 
-    public AiGenerateController(DeepSeekService deepSeekService) {
+    public AiGenerateController(DeepSeekService deepSeekService, AgentMetrics agentMetrics) {
         this.deepSeekService = deepSeekService;
+        this.agentMetrics = agentMetrics;
     }
 
     @GetMapping("/health")
@@ -35,6 +38,11 @@ public class AiGenerateController {
         );
     }
 
+    @GetMapping("/overview")
+    public Map<String, AgentMetrics.AgentStat> agentsOverview() {
+        return agentMetrics.getOverview();
+    }
+
     public record GenerateRequest(
             String taskId,
             String taskName,
@@ -45,12 +53,14 @@ public class AiGenerateController {
 
     @PostMapping("/generate-task-config")
     public ResponseEntity<GenerateTaskConfigResponse> generateTaskConfig(@RequestBody GenerateRequest request) {
+        agentMetrics.recordPipelineStage("config-gen-start", 0);
         var result = deepSeekService.generateTaskConfig(new GenerateTaskConfigRequest(
                 request.taskId() != null ? request.taskId() : "task_" + System.currentTimeMillis(),
                 request.taskName() != null ? request.taskName() : "",
                 request.instruction() != null ? request.instruction() : "",
                 request.sampleData() != null ? request.sampleData() : List.of()
         ));
+        agentMetrics.recordTaskStatusChange("draft");
         return ResponseEntity.ok(result);
     }
 }

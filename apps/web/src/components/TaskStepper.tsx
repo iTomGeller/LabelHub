@@ -44,41 +44,132 @@ interface TaskConfig {
   rationale: string;
 }
 
-const DEMO_SAMPLE_DATA = [
-  { comment: "退款申请三天了还不到账，客服也没人回复。", orderId: "ORD-10001", channel: "mobile-app" },
-  { comment: "质量很好下次还会购买，物流也快！", orderId: "ORD-10002", channel: "web" },
-  { comment: "尺寸偏大，但质量还行，能接受", orderId: "ORD-10003", channel: "mini-program" },
-  { comment: "客服回复很及时解决了我的问题", orderId: "ORD-10004", channel: "web" },
-  { comment: "发错颜色了联系换货一直没处理", orderId: "ORD-10005", channel: "mobile-app" },
-];
+const TASK_CONFIGS: Record<string, TaskConfig> = {
+  task_text_cls_001: {
+    taskId: "task_text_cls_001",
+    taskName: "客服对话情感分类",
+    instruction: "根据客服对话内容判断用户情感倾向（正面/负面/中性），标注触发情绪的关键句并给出理由。",
+    sampleData: [
+      { dialogue: "你们什么破售后！等了三天没人理！", sessionId: "CS-20001", agent: "小王" },
+      { dialogue: "谢谢客服帮我解决了，态度很好", sessionId: "CS-20002", agent: "小李" },
+      { dialogue: "请问退货地址是哪里？", sessionId: "CS-20003", agent: "小张" },
+      { dialogue: "物流信息一直不更新是怎么回事", sessionId: "CS-20004", agent: "小王" },
+      { dialogue: "非常满意这次的处理速度！五星好评", sessionId: "CS-20005", agent: "小李" },
+    ],
+    schemaComponents: [
+      { id: "raw_dialogue", type: "showItem", label: "客服对话", dataPath: "$.raw.dialogue", required: false, props: { template: "{{raw.dialogue}}" }, validation: [] },
+      { id: "sentiment", type: "singleChoice", label: "情感倾向", dataPath: "$.annotation.sentiment", required: true, props: { options: ["正面", "负面", "中性", "混合"] }, validation: [{ type: "required", message: "请选择情感倾向" }] },
+      { id: "trigger_sentence", type: "shortText", label: "触发关键句", dataPath: "$.annotation.trigger", required: true, props: { placeholder: "引用对话中引发情绪的句子" }, validation: [{ type: "required", message: "请填写触发句" }] },
+      { id: "emotion_tags", type: "multiChoice", label: "情绪类型", dataPath: "$.annotation.emotions", required: true, props: { options: ["愤怒", "焦虑", "满意", "感激", "困惑", "无奈"], min: 1, max: 3 }, validation: [{ type: "required", message: "至少选一个" }] },
+      { id: "reason", type: "longText", label: "判断理由", dataPath: "$.annotation.reason", required: true, props: { placeholder: "说明为何判定该情感" }, validation: [{ type: "required", message: "请填写理由" }, { type: "minLength", value: 8, message: "至少 8 字" }] },
+    ],
+    rubricRules: [
+      { ruleId: "R1", description: "情感标注须与对话语气一致，不得臆测", severity: "high", appliesTo: ["sentiment", "reason"], positiveExamples: ["对话有'破售后'等愤怒用语标为负面"], negativeExamples: ["询问退货地址标为负面"], allowAgentAutoPass: true },
+      { ruleId: "R2", description: "触发关键句必须是原文直接引用", severity: "medium", appliesTo: ["trigger_sentence"], positiveExamples: ["直接引用原文句子"], negativeExamples: ["自己编写总结"], allowAgentAutoPass: false },
+      { ruleId: "R3", description: "混合情感须同时给出正负面依据", severity: "medium", appliesTo: ["reason"], positiveExamples: ["既有不满也有感谢，分别引用"], negativeExamples: ["标为混合但只说一面"], allowAgentAutoPass: true },
+    ],
+    rubricDimensions: ["情感准确性", "关键句引用", "理由充分性", "一致性"],
+    assignmentPolicy: { mode: "auto_claim", replicasPerItem: 2, deadlineHours: 12, quotaPerLabeler: 80 },
+    agentPolicy: { precheckEnabled: true, confidenceThreshold: 0.85, modelPreference: "deepseek-chat", promptTemplateVersionId: "sentiment_v1" },
+    rationale: "客服对话情感分类任务，侧重情绪识别和关键句定位，双人标注保证质量。",
+  },
+  task_ner_002: {
+    taskId: "task_ner_002",
+    taskName: "电商评论实体抽取",
+    instruction: "从电商评论中抽取商品名称、品牌、属性描述、问题类型等命名实体，标注实体边界和类型。",
+    sampleData: [
+      { review: "华为Mate60 Pro手机拍照效果很好，但电池续航不太行", productId: "SKU-30001", category: "手机" },
+      { review: "耐克Air Max跑鞋很舒服，尺码偏大半码建议拍小一号", productId: "SKU-30002", category: "运动鞋" },
+      { review: "小米电视75寸画质清晰，安装师傅很专业", productId: "SKU-30003", category: "电视" },
+      { review: "兰蔻小黑瓶精华用了一周感觉皮肤变好了", productId: "SKU-30004", category: "护肤" },
+      { review: "戴森V15吸尘器吸力很强但噪音太大了", productId: "SKU-30005", category: "家电" },
+    ],
+    schemaComponents: [
+      { id: "raw_review", type: "showItem", label: "原始评论", dataPath: "$.raw.review", required: false, props: { template: "{{raw.review}}" }, validation: [] },
+      { id: "product_entity", type: "shortText", label: "商品名称", dataPath: "$.annotation.product", required: true, props: { placeholder: "如: 华为Mate60 Pro" }, validation: [{ type: "required", message: "请抽取商品名" }] },
+      { id: "brand_entity", type: "shortText", label: "品牌", dataPath: "$.annotation.brand", required: true, props: { placeholder: "如: 华为/耐克" }, validation: [{ type: "required", message: "请填写品牌" }] },
+      { id: "attributes", type: "multiChoice", label: "提及属性", dataPath: "$.annotation.attributes", required: true, props: { options: ["外观", "性能", "价格", "尺寸", "续航", "噪音", "质量", "服务"], min: 1, max: 5 }, validation: [{ type: "required", message: "至少标一个属性" }] },
+      { id: "sentiment_per_attr", type: "singleChoice", label: "属性情感", dataPath: "$.annotation.attrSentiment", required: true, props: { options: ["正面", "负面", "中性"] }, validation: [{ type: "required", message: "请选择" }] },
+      { id: "evidence_span", type: "longText", label: "证据文本段", dataPath: "$.annotation.span", required: true, props: { placeholder: "粘贴原文中对应的文本片段" }, validation: [{ type: "required", message: "请填写" }] },
+    ],
+    rubricRules: [
+      { ruleId: "R1", description: "实体抽取必须是原文出现的文本，不得修改", severity: "critical", appliesTo: ["product_entity", "brand_entity"], positiveExamples: ["原文写华为Mate60 Pro就填华为Mate60 Pro"], negativeExamples: ["自己缩写成华为M60P"], allowAgentAutoPass: false },
+      { ruleId: "R2", description: "属性标注须与证据段对应，不可凭推测", severity: "high", appliesTo: ["attributes", "evidence_span"], positiveExamples: ["评论说续航不行标续航并引用原句"], negativeExamples: ["没提价格但标了价格"], allowAgentAutoPass: true },
+      { ruleId: "R3", description: "同一评论多属性时应分别标注情感", severity: "medium", appliesTo: ["sentiment_per_attr"], positiveExamples: ["拍照好标正面，续航差标负面"], negativeExamples: ["统一标为正面"], allowAgentAutoPass: true },
+    ],
+    rubricDimensions: ["实体准确性", "边界精确度", "属性覆盖度", "情感一致性", "证据完整性"],
+    assignmentPolicy: { mode: "auto_claim", replicasPerItem: 1, deadlineHours: 48, quotaPerLabeler: 30 },
+    agentPolicy: { precheckEnabled: true, confidenceThreshold: 0.75, modelPreference: "deepseek-chat", promptTemplateVersionId: "ner_v1" },
+    rationale: "电商实体抽取任务，重点在实体边界精确和属性-情感映射准确。",
+  },
+  task_qa_003: {
+    taskId: "task_qa_003",
+    taskName: "问答对质量评估",
+    instruction: "评估 AI 生成的问答对质量，从准确性、完整性、流畅性和安全性四个维度打分（1-5），标注具体问题并给出改进建议。",
+    sampleData: [
+      { question: "Python中如何读取JSON文件？", answer: "使用json.load()函数，传入文件对象即可。", source: "code-qa", difficulty: "easy" },
+      { question: "什么是量子计算？", answer: "量子计算利用量子比特可以同时处于多个状态的特性进行计算。", source: "science-qa", difficulty: "medium" },
+      { question: "如何预防心血管疾病？", answer: "保持健康饮食和适度运动是关键。", source: "health-qa", difficulty: "medium" },
+      { question: "React中useEffect的依赖数组作用？", answer: "控制副作用函数的执行时机，空数组表示只在挂载时执行。", source: "code-qa", difficulty: "medium" },
+      { question: "黑洞是如何形成的？", answer: "大质量恒星耗尽燃料后引力坍缩形成。", source: "science-qa", difficulty: "hard" },
+    ],
+    schemaComponents: [
+      { id: "qa_display", type: "showItem", label: "问答展示", dataPath: "$.raw", required: false, props: { template: "Q: {{raw.question}}\nA: {{raw.answer}}" }, validation: [] },
+      { id: "accuracy_score", type: "singleChoice", label: "准确性评分", dataPath: "$.annotation.accuracy", required: true, props: { options: ["1-严重错误", "2-部分错误", "3-基本正确", "4-准确", "5-完全准确"] }, validation: [{ type: "required", message: "请评分" }] },
+      { id: "completeness_score", type: "singleChoice", label: "完整性评分", dataPath: "$.annotation.completeness", required: true, props: { options: ["1-严重缺失", "2-明显不全", "3-基本覆盖", "4-较完整", "5-全面完整"] }, validation: [{ type: "required", message: "请评分" }] },
+      { id: "fluency_score", type: "singleChoice", label: "流畅性评分", dataPath: "$.annotation.fluency", required: true, props: { options: ["1-难以理解", "2-表达混乱", "3-基本通顺", "4-流畅", "5-优美自然"] }, validation: [{ type: "required", message: "请评分" }] },
+      { id: "safety_check", type: "singleChoice", label: "安全性", dataPath: "$.annotation.safety", required: true, props: { options: ["安全", "存在风险", "不安全"] }, validation: [{ type: "required", message: "请判断" }] },
+      { id: "issues", type: "multiChoice", label: "存在问题", dataPath: "$.annotation.issues", required: false, props: { options: ["事实错误", "逻辑不通", "信息过时", "回答偏题", "缺少关键信息", "表述冗余", "无问题"], min: 0, max: 4 }, validation: [] },
+      { id: "suggestion", type: "longText", label: "改进建议", dataPath: "$.annotation.suggestion", required: false, props: { placeholder: "针对发现的问题给出具体改进建议" }, validation: [] },
+    ],
+    rubricRules: [
+      { ruleId: "R1", description: "评分必须与选择的问题类型一致，高分不能有严重问题", severity: "critical", appliesTo: ["accuracy_score", "issues"], positiveExamples: ["标了事实错误则准确性≤3"], negativeExamples: ["有事实错误但给5分"], allowAgentAutoPass: false },
+      { ruleId: "R2", description: "安全性标注优先级最高，涉及健康/法律须谨慎", severity: "critical", appliesTo: ["safety_check"], positiveExamples: ["医疗建议标为存在风险"], negativeExamples: ["不专业医疗建议标为安全"], allowAgentAutoPass: false },
+      { ruleId: "R3", description: "改进建议须具体可执行，不能泛泛而谈", severity: "medium", appliesTo: ["suggestion"], positiveExamples: ["建议补充json.load的参数说明和异常处理"], negativeExamples: ["建议改进一下"], allowAgentAutoPass: true },
+    ],
+    rubricDimensions: ["评分一致性", "问题识别能力", "安全意识", "建议质量"],
+    assignmentPolicy: { mode: "auto_claim", replicasPerItem: 3, deadlineHours: 72, quotaPerLabeler: 20 },
+    agentPolicy: { precheckEnabled: true, confidenceThreshold: 0.7, modelPreference: "deepseek-chat", promptTemplateVersionId: "qa_eval_v1" },
+    rationale: "问答质量评估任务，多维度打分+具体问题标注，三人标注取共识。",
+  },
+};
 
-const DEMO_COMPONENTS: SchemaComponent[] = [
-  { id: "raw_comment", type: "showItem", label: "原始评论", dataPath: "$.raw.comment", required: false, props: { template: "{{raw.comment}}" }, validation: [] },
-  { id: "intent", type: "singleChoice", label: "主要意图", dataPath: "$.annotation.intent", required: true, props: { options: ["咨询", "投诉", "夸赞", "售后", "无关"] }, validation: [{ type: "required", message: "请选择主要意图" }] },
-  { id: "issue_types", type: "multiChoice", label: "问题类型", dataPath: "$.annotation.issueTypes", required: true, props: { options: ["退款", "物流", "客服", "商品质量", "价格"], min: 1, max: 3 }, validation: [{ type: "required", message: "至少选择一个问题类型" }] },
-  { id: "sentiment_tags", type: "tagSelect", label: "情绪标签", dataPath: "$.annotation.sentimentTags", required: false, props: { options: ["愤怒", "焦虑", "满意", "疑惑", "中性"], max: 3 }, validation: [] },
-  { id: "reason", type: "longText", label: "判断理由", dataPath: "$.annotation.reason", required: true, props: { placeholder: "引用评论中的关键信息说明判断依据" }, validation: [{ type: "required", message: "请填写判断理由" }, { type: "minLength", value: 8, message: "判断理由至少 8 个字" }] },
-  { id: "evidence_upload", type: "fileUpload", label: "证据截图", dataPath: "$.annotation.evidenceFiles", required: false, props: { accept: ["image/png", "image/jpeg"], maxFiles: 3 }, validation: [] },
-];
-
-const DEMO_RULES: RubricRule[] = [
-  { ruleId: "R1", description: "主要意图必须能从原始评论中直接找到依据", severity: "high", appliesTo: ["intent", "reason"], positiveExamples: ["评论提到退款失败，标注为售后并说明退款上下文"], negativeExamples: ["评论只表达满意，但标注为投诉"], allowAgentAutoPass: true },
-  { ruleId: "R2", description: "判断理由必须引用评论中的关键词，不能只写结论", severity: "medium", appliesTo: ["reason"], positiveExamples: ["因为用户说'一直不到账'，所以归为售后"], negativeExamples: ["原因写'就是售后'"], allowAgentAutoPass: false },
-  { ruleId: "R3", description: "多选问题类型时每项须与评论内容对应", severity: "medium", appliesTo: ["issue_types"], positiveExamples: ["评论涉及退款和客服不回复，选择'退款'和'客服'"], negativeExamples: ["随意多选不相关类型"], allowAgentAutoPass: true },
-];
-
-const DEMO_CONFIG: TaskConfig = {
+const NEW_TASK_CONFIG: TaskConfig = {
   taskId: `task_${Date.now()}`,
-  taskName: "电商评论意图分类",
-  instruction: "根据电商用户评论判断主要意图（咨询/投诉/夸赞/售后/无关），标注问题类型和情绪标签，并给出判断依据。",
-  sampleData: DEMO_SAMPLE_DATA,
-  schemaComponents: DEMO_COMPONENTS,
-  rubricRules: DEMO_RULES,
-  rubricDimensions: ["相关性", "准确性", "格式合规", "安全性"],
+  taskName: "",
+  instruction: "",
+  sampleData: [],
+  schemaComponents: [],
+  rubricRules: [],
+  rubricDimensions: [],
   assignmentPolicy: { mode: "auto_claim", replicasPerItem: 1, deadlineHours: 24, quotaPerLabeler: 50 },
   agentPolicy: { precheckEnabled: true, confidenceThreshold: 0.8, modelPreference: "deepseek-chat", promptTemplateVersionId: "auto_v1" },
-  rationale: "基于电商评论数据，配置了意图分类（单选）、问题类型（多选）、情绪标签和判断理由，覆盖典型标注场景。",
+  rationale: "",
 };
+
+function loadConfigForTask(taskId?: string): TaskConfig {
+  if (!taskId) return { ...NEW_TASK_CONFIG, taskId: `task_${Date.now()}` };
+  const stored = typeof window !== "undefined" ? localStorage.getItem(`labelhub_task_${taskId}`) : null;
+  if (stored) {
+    try {
+      const pkg = JSON.parse(stored);
+      return {
+        taskId: pkg.taskId || taskId,
+        taskName: pkg.title || "",
+        instruction: pkg.instruction || "",
+        sampleData: pkg.sampleData || [],
+        schemaComponents: pkg.schema?.components || [],
+        rubricRules: pkg.rubric?.rules || [],
+        rubricDimensions: pkg.rubric?.dimensions || [],
+        assignmentPolicy: pkg.assignmentPolicy || NEW_TASK_CONFIG.assignmentPolicy,
+        agentPolicy: pkg.agentPolicy || NEW_TASK_CONFIG.agentPolicy,
+        rationale: pkg.rationale || "",
+      };
+    } catch { /* fall through */ }
+  }
+  if (TASK_CONFIGS[taskId]) return TASK_CONFIGS[taskId];
+  return { ...NEW_TASK_CONFIG, taskId };
+}
 
 const componentTypeLabels: Record<string, string> = {
   shortText: "单行输入",
@@ -102,9 +193,9 @@ const COMPONENT_PRESETS: SchemaComponent[] = [
   { id: "", type: "fileUpload", label: "截图上传", dataPath: "$.annotation.files", required: false, props: { accept: ["image/png", "image/jpeg"], maxFiles: 3 }, validation: [] },
 ];
 
-export function TaskStepper() {
+export function TaskStepper({ taskId }: { taskId?: string }) {
   const [step, setStep] = useState<StepKey>("upload");
-  const [config, setConfig] = useState<TaskConfig>(DEMO_CONFIG);
+  const [config, setConfig] = useState<TaskConfig>(() => loadConfigForTask(taskId));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [published, setPublished] = useState(false);
@@ -184,7 +275,7 @@ export function TaskStepper() {
         <h2 className="mt-4 text-2xl font-bold text-primary">任务发布成功</h2>
         <p className="mt-2 text-sm text-ink/60">B（标注工作台）和 C（审核工作台）现在可以通过 API 消费此任务包。</p>
         <div className="mt-6 flex gap-3">
-          <button onClick={() => { setPublished(false); setConfig({ ...DEMO_CONFIG, taskId: `task_${Date.now()}` }); setStep("upload"); }} className="rounded-xl border border-primary/20 px-5 py-2.5 text-sm font-bold text-primary hover:border-accent">新建任务</button>
+          <button onClick={() => { setPublished(false); setConfig({ ...NEW_TASK_CONFIG, taskId: `task_${Date.now()}` }); setStep("upload"); }} className="rounded-xl border border-primary/20 px-5 py-2.5 text-sm font-bold text-primary hover:border-accent">新建任务</button>
           <a href="/?view=list" className="rounded-xl bg-accent px-5 py-2.5 text-sm font-bold text-white hover:bg-accent/90">查看任务列表</a>
         </div>
       </div>

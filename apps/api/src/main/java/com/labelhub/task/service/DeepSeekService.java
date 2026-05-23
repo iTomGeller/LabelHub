@@ -26,6 +26,7 @@ public class DeepSeekService {
     private final ObjectMapper objectMapper;
     private final String model;
     private final boolean enabled;
+    private final AgentMetrics agentMetrics;
 
     private final Counter callsSuccess;
     private final Counter callsFallback;
@@ -40,11 +41,13 @@ public class DeepSeekService {
             @Value("${deepseek.base-url:https://api.deepseek.com}") String baseUrl,
             @Value("${deepseek.model:deepseek-chat}") String model,
             ObjectMapper objectMapper,
-            MeterRegistry meterRegistry
+            MeterRegistry meterRegistry,
+            AgentMetrics agentMetrics
     ) {
         this.model = model;
         this.objectMapper = objectMapper;
         this.enabled = apiKey != null && !apiKey.isBlank();
+        this.agentMetrics = agentMetrics;
 
         this.callsSuccess = Counter.builder("deepseek.calls")
                 .tag("outcome", "success").register(meterRegistry);
@@ -102,6 +105,7 @@ public class DeepSeekService {
             log.warn("DeepSeek API key not configured, returning fallback config");
             callsFallback.increment();
             totalCalls.incrementAndGet();
+            agentMetrics.recordAgentCall(AgentMetrics.AGENT_CONFIG_GEN, "fallback", 0);
             return fallbackConfig(request);
         }
 
@@ -180,6 +184,9 @@ public class DeepSeekService {
             JsonNode result = objectMapper.readTree(content);
 
             callsSuccess.increment();
+            agentMetrics.recordAgentCall(AgentMetrics.AGENT_CONFIG_GEN, "success", elapsed * 1_000_000L);
+            agentMetrics.recordConfidence(AgentMetrics.AGENT_CONFIG_GEN, 0.85);
+            agentMetrics.recordAgentChain(AgentMetrics.AGENT_CONFIG_GEN, AgentMetrics.AGENT_SCHEMA_RISK);
             return new GenerateTaskConfigResponse(
                     request.taskId(),
                     parseListOfMaps(result, "schemaComponents"),
@@ -195,6 +202,8 @@ public class DeepSeekService {
             totalLatencyMs.addAndGet(elapsed);
             totalCalls.incrementAndGet();
             callsError.increment();
+            agentMetrics.recordAgentCall(AgentMetrics.AGENT_CONFIG_GEN, "error", elapsed * 1_000_000L);
+            agentMetrics.recordCascadeFailure(AgentMetrics.AGENT_CONFIG_GEN);
 
             log.error("DeepSeek API call failed: {}", e.getMessage(), e);
             var fallback = fallbackConfig(request);

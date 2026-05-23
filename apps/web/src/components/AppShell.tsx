@@ -2,11 +2,10 @@
 
 const navItems = [
   { key: "list", label: "任务列表", href: "/?view=list" },
-  { key: "task", label: "当前任务", href: "/?view=task" },
   { key: "settings", label: "系统设置", href: "/?view=settings" }
 ] as const;
 
-export type ViewKey = (typeof navItems)[number]["key"];
+export type ViewKey = (typeof navItems)[number]["key"] | "task";
 
 export function AppShell({
   children,
@@ -28,19 +27,22 @@ export function AppShell({
 
       <aside className="fixed bottom-0 left-0 top-14 w-52 bg-primary px-3 py-6 text-white">
         <nav className="space-y-1" aria-label="主导航">
-          {navItems.map((item) => (
-            <a
-              key={item.key}
-              className={`block rounded-xl px-4 py-3 text-sm font-semibold transition ${
-                item.key === activeView
-                  ? "bg-accent text-white shadow-lg"
-                  : "text-white/80 hover:bg-white/10 hover:text-white"
-              }`}
-              href={item.href}
-            >
-              {item.label}
-            </a>
-          ))}
+          {navItems.map((item) => {
+            const isActive = item.key === activeView || (item.key === "list" && activeView === "task");
+            return (
+              <a
+                key={item.key}
+                className={`block rounded-xl px-4 py-3 text-sm font-semibold transition ${
+                  isActive
+                    ? "bg-accent text-white shadow-lg"
+                    : "text-white/80 hover:bg-white/10 hover:text-white"
+                }`}
+                href={item.href}
+              >
+                {item.label}
+              </a>
+            );
+          })}
         </nav>
       </aside>
 

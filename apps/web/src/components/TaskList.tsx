@@ -61,7 +61,7 @@ export function TaskList() {
         {mockTasks.map((task) => (
           <a
             key={task.taskId}
-            href="/?view=task"
+            href={`/?view=task&taskId=${task.taskId}`}
             className="group rounded-2xl border border-primary/10 bg-white p-5 shadow-sm transition hover:border-accent/40 hover:shadow-md"
           >
             <div className="flex items-start justify-between">

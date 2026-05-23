@@ -6,27 +6,28 @@ import { AiDrawer } from "@/components/AiDrawer";
 
 const views: ViewKey[] = ["list", "task", "settings"];
 
-export default function Home({ searchParams }: { searchParams?: { view?: string } }) {
+export default function Home({ searchParams }: { searchParams?: { view?: string; taskId?: string } }) {
   const activeView = parseView(searchParams?.view);
+  const taskId = searchParams?.taskId;
 
   return (
     <AppShell activeView={activeView}>
-      {renderView(activeView)}
+      {renderView(activeView, taskId)}
       <AiDrawer />
     </AppShell>
   );
 }
 
 function parseView(view: string | undefined): ViewKey {
-  return views.includes(view as ViewKey) ? (view as ViewKey) : "task";
+  return views.includes(view as ViewKey) ? (view as ViewKey) : "list";
 }
 
-function renderView(activeView: ViewKey) {
+function renderView(activeView: ViewKey, taskId?: string) {
   switch (activeView) {
     case "list":
       return <TaskList />;
     case "task":
-      return <TaskStepper />;
+      return <TaskStepper taskId={taskId} />;
     case "settings":
       return <SettingsView />;
   }

@@ -7,6 +7,7 @@ import com.labelhub.task.dto.TaskPackageDtos.DataItemViewDto;
 import com.labelhub.task.dto.TaskPackageDtos.InstructionBundleDto;
 import com.labelhub.task.dto.TaskPackageDtos.PublishReadinessDto;
 import com.labelhub.task.dto.TaskPackageDtos.TaskPackageDto;
+import com.labelhub.task.service.AgentMetrics;
 import com.labelhub.task.service.TaskPackageService;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
@@ -21,9 +22,11 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/tasks")
 public class TaskConfigController {
   private final TaskPackageService taskPackageService;
+  private final AgentMetrics agentMetrics;
 
-  public TaskConfigController(TaskPackageService taskPackageService) {
+  public TaskConfigController(TaskPackageService taskPackageService, AgentMetrics agentMetrics) {
     this.taskPackageService = taskPackageService;
+    this.agentMetrics = agentMetrics;
   }
 
   @GetMapping("/{taskId}/package")
@@ -51,7 +54,16 @@ public class TaskConfigController {
       @PathVariable String taskId,
       @Valid @RequestBody TaskPackageDto taskPackage
   ) {
-    return taskPackageService.checkPublishReadiness(taskPackage);
+    long start = System.nanoTime();
+    try {
+      var result = taskPackageService.checkPublishReadiness(taskPackage);
+      agentMetrics.recordAgentCall(AgentMetrics.AGENT_PUBLISH_CHECK, "success", System.nanoTime() - start);
+      agentMetrics.recordAgentChain(AgentMetrics.AGENT_SCHEMA_RISK, AgentMetrics.AGENT_PUBLISH_CHECK);
+      return result;
+    } catch (Exception e) {
+      agentMetrics.recordAgentCall(AgentMetrics.AGENT_PUBLISH_CHECK, "error", System.nanoTime() - start);
+      throw e;
+    }
   }
 
   @PostMapping("/{taskId}/schema-risk")
@@ -59,7 +71,17 @@ public class TaskConfigController {
       @PathVariable String taskId,
       @Valid @RequestBody TaskPackageDto taskPackage
   ) {
-    return taskPackageService.buildSchemaRiskReport(taskPackage);
+    long start = System.nanoTime();
+    try {
+      var result = taskPackageService.buildSchemaRiskReport(taskPackage);
+      agentMetrics.recordAgentCall(AgentMetrics.AGENT_SCHEMA_RISK, "success", System.nanoTime() - start);
+      agentMetrics.recordConfidence(AgentMetrics.AGENT_SCHEMA_RISK, 0.9);
+      return result;
+    } catch (Exception e) {
+      agentMetrics.recordAgentCall(AgentMetrics.AGENT_SCHEMA_RISK, "error", System.nanoTime() - start);
+      agentMetrics.recordCascadeFailure(AgentMetrics.AGENT_SCHEMA_RISK);
+      throw e;
+    }
   }
 
   @PostMapping("/{taskId}/dataset-profile")
@@ -67,7 +89,16 @@ public class TaskConfigController {
       @PathVariable String taskId,
       @Valid @RequestBody TaskPackageDto taskPackage
   ) {
-    return taskPackageService.profileDataset(taskPackage);
+    long start = System.nanoTime();
+    try {
+      var result = taskPackageService.profileDataset(taskPackage);
+      agentMetrics.recordAgentCall(AgentMetrics.AGENT_DATASET_PROFILE, "success", System.nanoTime() - start);
+      agentMetrics.recordAgentChain(AgentMetrics.AGENT_DATASET_PROFILE, AgentMetrics.AGENT_SCHEMA_RISK);
+      return result;
+    } catch (Exception e) {
+      agentMetrics.recordAgentCall(AgentMetrics.AGENT_DATASET_PROFILE, "error", System.nanoTime() - start);
+      throw e;
+    }
   }
 
   @GetMapping("/health")
