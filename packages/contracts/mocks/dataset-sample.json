@@ -1,0 +1,44 @@
+{
+  "datasetId": "dataset_reviews_001",
+  "taskId": "task_text_cls_001",
+  "sampleSize": 3,
+  "fields": [
+    {
+      "name": "comment",
+      "type": "string",
+      "nullRate": 0,
+      "example": "退款申请三天了还不到账，客服也没人回复。"
+    },
+    {
+      "name": "orderId",
+      "type": "string",
+      "nullRate": 0.12,
+      "example": "ORD-10001"
+    },
+    {
+      "name": "channel",
+      "type": "string",
+      "nullRate": 0,
+      "example": "mobile-app"
+    }
+  ],
+  "examples": [
+    {
+      "itemId": "item_001",
+      "rawPayload": {
+        "comment": "退款申请三天了还不到账，客服也没人回复。",
+        "orderId": "ORD-10001",
+        "channel": "mobile-app"
+      },
+      "displayPayload": {
+        "title": "评论 #001",
+        "body": "退款申请三天了还不到账，客服也没人回复。"
+      },
+      "mediaRefs": [],
+      "metadata": {
+        "source": "demo",
+        "language": "zh-CN"
+      }
+    }
+  ]
+}

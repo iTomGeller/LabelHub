@@ -1,0 +1,19 @@
+{
+  "name": "labelhub",
+  "private": true,
+  "version": "0.1.0",
+  "description": "LabelHub data annotation platform monorepo.",
+  "workspaces": [
+    "apps/web",
+    "packages/contracts"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present"
+  },
+  "engines": {
+    "node": ">=20.11.0"
+  }
+}
