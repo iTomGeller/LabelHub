@@ -5,7 +5,7 @@ const navItems = [
   { key: "settings", label: "系统设置", href: "/?view=settings" }
 ] as const;
 
-export type ViewKey = (typeof navItems)[number]["key"] | "task" | "detail";
+export type ViewKey = (typeof navItems)[number]["key"] | "task" | "detail" | "trace";
 
 export function AppShell({
   children,

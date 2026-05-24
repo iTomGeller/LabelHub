@@ -2,9 +2,11 @@
 
 import { useState, useEffect } from "react";
 import { SubTabs } from "./SubTabs";
+import { KnowledgeBasePanel } from "./KnowledgeBasePanel";
 
 const TABS = [
   { key: "ai", label: "AI 服务状态" },
+  { key: "knowledge", label: "知识库" },
   { key: "export", label: "导出设置" },
 ];
 
@@ -13,13 +15,14 @@ export function SettingsView() {
     <div className="space-y-5">
       <div>
         <h1 className="font-display text-3xl font-bold text-primary">系统设置</h1>
-        <p className="mt-1 text-sm text-ink/60">AI 服务监控、任务包导出。</p>
+        <p className="mt-1 text-sm text-ink/60">AI 服务监控、知识库管理、任务包导出。</p>
       </div>
 
       <SubTabs tabs={TABS} defaultTab="ai">
         {(tab) => {
           switch (tab) {
             case "ai": return <AiSettings />;
+            case "knowledge": return <KnowledgeBasePanel />;
             case "export": return <ExportSettings />;
             default: return null;
           }

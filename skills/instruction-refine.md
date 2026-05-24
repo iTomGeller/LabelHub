@@ -1,7 +1,14 @@
 ---
 name: instruction-refine
-version: 0.1.0
+version: 0.2.0
 description: Refine owner task instructions into labeler-ready instructions.
+triggers:
+  - task_context
+  - instruction_check
+outputSchema:
+  - instructionFindings
+  - ambiguities
+  - confidence
 ---
 
 # Instruction Refine Skill

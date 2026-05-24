@@ -110,6 +110,61 @@ public class AgentMetrics {
                 .record(Duration.ofMillis(durationMs));
     }
 
+    public void recordAuditRun(String status, boolean fromCache) {
+        Counter.builder("audit_run_total")
+                .tag("status", status)
+                .tag("from_cache", String.valueOf(fromCache))
+                .register(registry).increment();
+    }
+
+    public void recordAuditCacheHit() {
+        Counter.builder("audit_cache_hit_total").register(registry).increment();
+    }
+
+    public void recordAuditCacheMiss() {
+        Counter.builder("audit_cache_miss_total").register(registry).increment();
+    }
+
+    public void recordAuditNodeDuration(String node, String type, long durationMs) {
+        Timer.builder("audit_node_duration_seconds")
+                .tag("node", node).tag("type", type)
+                .register(registry).record(Duration.ofMillis(durationMs));
+    }
+
+    public void recordRagRetrieval(String source, String status) {
+        Counter.builder("rag_retrieval_total")
+                .tag("source", source).tag("status", status)
+                .register(registry).increment();
+    }
+
+    public void recordRagEmptyRecall() {
+        Counter.builder("rag_empty_recall_total").register(registry).increment();
+    }
+
+    public void recordSkillSelected(String skill, String node) {
+        Counter.builder("skill_selected_total")
+                .tag("skill", skill).tag("node", node)
+                .register(registry).increment();
+    }
+
+    public void recordSkillFinding(String skill, String severity) {
+        Counter.builder("skill_finding_total")
+                .tag("skill", skill).tag("severity", severity)
+                .register(registry).increment();
+    }
+
+    public void recordMcpCall(String server, String tool, String status) {
+        Counter.builder("mcp_call_total")
+                .tag("server", server).tag("tool", tool).tag("status", status)
+                .register(registry).increment();
+    }
+
+    public void recordSandboxExecution(String tool, String status) {
+        Counter.builder("sandbox_execution_total")
+                .tag("tool", tool).tag("status", status)
+                .register(registry).increment();
+    }
+
     public void recordTaskPublish() {
         publishTotal.incrementAndGet();
         Counter.builder("task.publish")

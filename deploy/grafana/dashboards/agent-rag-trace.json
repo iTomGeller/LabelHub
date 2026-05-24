@@ -1,0 +1,85 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "title": "审核运行总览",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "targets": [{ "expr": "sum(audit_run_total)", "legendFormat": "总运行次数" }]
+    },
+    {
+      "title": "缓存命中率",
+      "type": "gauge",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "targets": [{ "expr": "sum(audit_cache_hit_total) / (sum(audit_cache_hit_total) + sum(audit_cache_miss_total))", "legendFormat": "命中率" }]
+    },
+    {
+      "title": "RAG 召回次数",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "targets": [{ "expr": "sum(rag_retrieval_total)", "legendFormat": "召回总次数" }]
+    },
+    {
+      "title": "RAG 空召回率",
+      "type": "gauge",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "targets": [{ "expr": "sum(rag_empty_recall_total) / sum(rag_retrieval_total)", "legendFormat": "空召回率" }]
+    },
+    {
+      "title": "审核节点耗时分布",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "targets": [{ "expr": "histogram_quantile(0.95, sum(rate(audit_node_duration_seconds_bucket[5m])) by (le, node))", "legendFormat": "{{node}} P95" }]
+    },
+    {
+      "title": "Skill 选择频率",
+      "type": "bargauge",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "targets": [{ "expr": "sum by (skill) (skill_selected_total)", "legendFormat": "{{skill}}" }]
+    },
+    {
+      "title": "Skill Findings 按严重度",
+      "type": "piechart",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 12 },
+      "targets": [{ "expr": "sum by (severity) (skill_finding_total)", "legendFormat": "{{severity}}" }]
+    },
+    {
+      "title": "Sandbox 执行状态",
+      "type": "bargauge",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 12 },
+      "targets": [{ "expr": "sum by (tool, status) (sandbox_execution_total)", "legendFormat": "{{tool}} - {{status}}" }]
+    },
+    {
+      "title": "MCP 调用状态",
+      "type": "bargauge",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 12 },
+      "targets": [{ "expr": "sum by (server, status) (mcp_call_total)", "legendFormat": "{{server}} - {{status}}" }]
+    },
+    {
+      "title": "审核缓存命中/未命中趋势",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+      "targets": [
+        { "expr": "sum(rate(audit_cache_hit_total[5m]))", "legendFormat": "缓存命中" },
+        { "expr": "sum(rate(audit_cache_miss_total[5m]))", "legendFormat": "缓存未命中" }
+      ]
+    },
+    {
+      "title": "Pipeline 总耗时趋势",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
+      "targets": [{ "expr": "histogram_quantile(0.95, sum(rate(task_pipeline_duration_bucket{stage=\"audit_run_total\"}[5m])) by (le))", "legendFormat": "P95 总耗时" }]
+    }
+  ],
+  "schemaVersion": 38,
+  "tags": ["labelhub", "agent", "rag", "trace"],
+  "templating": { "list": [] },
+  "time": { "from": "now-1h", "to": "now" },
+  "title": "LabelHub Agent/RAG/Trace 监控",
+  "uid": "labelhub-agent-rag-trace"
+}

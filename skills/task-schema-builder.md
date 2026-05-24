@@ -1,7 +1,14 @@
 ---
 name: task-schema-builder
-version: 0.1.0
+version: 0.2.0
 description: Generate and validate LabelHub task annotation schemas.
+triggers:
+  - schema_generator
+  - schema_contract_check
+outputSchema:
+  - componentFindings
+  - recommendedFixes
+  - confidence
 ---
 
 # Task Schema Builder Skill

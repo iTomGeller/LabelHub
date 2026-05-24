@@ -195,19 +195,49 @@ const COMPONENT_PRESETS: SchemaComponent[] = [
 
 type DagResultType = { pipelineId: string; stages: { stage: string; status: string; durationMs: number; output: Record<string, unknown>; summary: string }[]; allPassed: boolean };
 
+async function computeStableHash(config: TaskConfig): Promise<string> {
+  const canonical = JSON.stringify({
+    taskName: config.taskName,
+    instruction: config.instruction,
+    sampleData: config.sampleData,
+    schemaComponents: config.schemaComponents,
+    rubricRules: config.rubricRules,
+    rubricDimensions: config.rubricDimensions,
+  });
+  const encoder = new TextEncoder();
+  const data = encoder.encode(canonical);
+  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
 function getConfigHash(config: TaskConfig): string {
   return `${config.taskName}|${config.instruction.slice(0, 50)}|${config.sampleData.length}|${config.schemaComponents.length}|${config.rubricRules.length}|${config.rubricDimensions.length}`;
 }
 
-export function TaskStepper({ taskId }: { taskId?: string }) {
-  const [step, setStep] = useState<StepKey>("upload");
+function loadAuditCache(taskId: string): { hash: string; result: DagResultType } | null {
+  try {
+    const raw = localStorage.getItem(`labelhub_audit_run_${taskId}`);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch { return null; }
+}
+
+function saveAuditCache(taskId: string, hash: string, result: DagResultType) {
+  try {
+    localStorage.setItem(`labelhub_audit_run_${taskId}`, JSON.stringify({ hash, result }));
+  } catch { /* quota exceeded */ }
+}
+
+export function TaskStepper({ taskId, initialStep }: { taskId?: string; initialStep?: string }) {
+  const validStep = initialStep && STEPS.some(s => s.key === initialStep) ? initialStep as StepKey : "upload";
+  const [step, setStep] = useState<StepKey>(validStep);
   const [config, setConfig] = useState<TaskConfig>(() => loadConfigForTask(taskId));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [published, setPublished] = useState(false);
   const [dagPassed, setDagPassed] = useState(false);
   const [dagReport, setDagReport] = useState<{ pipelineId: string; allPassed: boolean; totalMs: number; stages: { stage: string; status: string; durationMs: number; summary: string }[] } | null>(null);
-  const [dagCache, setDagCache] = useState<{ hash: string; result: DagResultType } | null>(null);
+  const [dagCache, setDagCache] = useState<{ hash: string; result: DagResultType } | null>(() => loadAuditCache(config.taskId));
   const currentIdx = STEPS.findIndex((s) => s.key === step);
 
   function goNext() {
@@ -349,7 +379,7 @@ export function TaskStepper({ taskId }: { taskId?: string }) {
       {step === "upload" && <StepUpload config={config} setConfig={setConfig} onAiGenerate={handleAiGenerate} loading={loading} />}
       {step === "template" && <StepTemplate config={config} setConfig={setConfig} />}
       {step === "rules" && <StepRules config={config} setConfig={setConfig} />}
-      {step === "publish" && <StepPublish config={config} allPassed={allPassed} checks={checks} dagCache={dagCache} onDagResult={(passed, report) => { setDagPassed(passed); if (report) setDagReport(report); setDagCache({ hash: getConfigHash(config), result: { pipelineId: report?.pipelineId || "", stages: (report?.stages || []).map(s => ({ ...s, output: {} })), allPassed: passed } }); }} />}
+      {step === "publish" && <StepPublish config={config} allPassed={allPassed} checks={checks} dagCache={dagCache} onDagResult={(passed, report) => { setDagPassed(passed); if (report) setDagReport(report); const hash = getConfigHash(config); const cacheEntry = { hash, result: { pipelineId: report?.pipelineId || "", stages: (report?.stages || []).map(s => ({ ...s, output: {} })), allPassed: passed } }; setDagCache(cacheEntry); saveAuditCache(config.taskId, hash, cacheEntry.result); }} />}
 
       <div className="flex items-center justify-between">
         <button onClick={goPrev} disabled={currentIdx === 0} className={`rounded-xl border border-primary/20 px-5 py-2.5 text-sm font-bold ${currentIdx === 0 ? "cursor-not-allowed text-ink/30" : "text-primary hover:border-accent"}`}>上一步</button>
@@ -1089,21 +1119,54 @@ function StepPublish({ config, allPassed, checks, onDagResult, dagCache }: { con
   const [dagResult, setDagResult] = useState<DagResultType | null>(dagCache?.result || null);
   const [dagHash, setDagHash] = useState<string>(dagCache?.hash || "");
   const [copied, setCopied] = useState(false);
+  const [businessNodes, setBusinessNodes] = useState<{ id: string; nodeKey: string; title: string; status: string; summary: string; evidence: string; impact: string; suggestion: string; referenceSources: string[]; fixStep: string; durationMs: number }[]>([]);
+  const [traceNodes, setTraceNodes] = useState<{ id: string; type: string; title: string; status: string; durationMs: number; rag?: Record<string, unknown>; skill?: Record<string, unknown> }[]>([]);
+  const [traceId, setTraceId] = useState<string>("");
+  const [fromCache, setFromCache] = useState(false);
+  const [showDevTrace, setShowDevTrace] = useState(false);
 
   const currentHash = getConfigHash(config);
 
-  async function runDagCheck() {
+  async function runAuditCheck(forceRun = false) {
     setDagLoading(true);
     try {
-      const res = await fetch("/agent-api/agents/pipeline", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ taskName: config.taskName, instruction: config.instruction, sampleData: config.sampleData.slice(0, 5) }) });
+      const res = await fetch("/agent-api/agents/audit-runs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          taskId: config.taskId,
+          taskName: config.taskName,
+          instruction: config.instruction,
+          sampleData: config.sampleData.slice(0, 10),
+          schemaComponents: config.schemaComponents,
+          rubricRules: config.rubricRules,
+          rubricDimensions: config.rubricDimensions,
+          forceRun,
+        }),
+      });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      setDagResult(data);
+
+      setBusinessNodes(data.businessDag || []);
+      setTraceNodes(data.developerDag || []);
+      setTraceId(data.traceId || "");
+      setFromCache(data.fromCache === true);
+
+      const ap = data.status === "success";
+      const totalMs = data.durationMs || 0;
+      const stages = (data.businessDag || []).map((n: { nodeKey: string; status: string; durationMs: number; summary: string }) => ({
+        stage: n.nodeKey, status: n.status, durationMs: n.durationMs, summary: n.summary
+      }));
+
+      setDagResult({ pipelineId: data.traceId, stages, allPassed: ap });
       setDagHash(currentHash);
-      const totalMs = data.stages?.reduce((s: number, x: { durationMs: number }) => s + x.durationMs, 0) || 0;
-      onDagResult(data.allPassed === true, { pipelineId: data.pipelineId, allPassed: data.allPassed, totalMs, stages: data.stages.map((s: { stage: string; status: string; durationMs: number; summary: string }) => ({ stage: s.stage, status: s.status, durationMs: s.durationMs, summary: s.summary })) });
-    } catch (e) { alert("审核执行失败: " + (e instanceof Error ? e.message : "")); onDagResult(false); }
-    finally { setDagLoading(false); }
+      onDagResult(ap, { pipelineId: data.traceId, allPassed: ap, totalMs, stages });
+    } catch (e) {
+      alert("审核执行失败: " + (e instanceof Error ? e.message : ""));
+      onDagResult(false);
+    } finally {
+      setDagLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -1111,20 +1174,18 @@ function StepPublish({ config, allPassed, checks, onDagResult, dagCache }: { con
     if (dagCache && dagCache.hash === hash) {
       setDagResult(dagCache.result);
       setDagHash(hash);
+      setFromCache(true);
       const totalMs = dagCache.result.stages?.reduce((s: number, x: { durationMs: number }) => s + x.durationMs, 0) || 0;
       onDagResult(dagCache.result.allPassed === true, { pipelineId: dagCache.result.pipelineId, allPassed: dagCache.result.allPassed, totalMs, stages: dagCache.result.stages.map(s => ({ stage: s.stage, status: s.status, durationMs: s.durationMs, summary: s.summary })) });
       return;
     }
     if (!dagResult && !dagLoading && config.taskName.trim()) {
-      runDagCheck();
+      runAuditCheck(false);
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const isCacheValid = dagHash === currentHash && dagResult !== null;
   const canPublish = allPassed && dagResult?.allPassed === true;
-  const visibleStages = dagResult?.stages.filter(s => s.stage !== "skill_loader") || [];
-  const totalMs = visibleStages.reduce((s, x) => s + x.durationMs, 0);
-  const passedCount = visibleStages.filter(s => s.status === "success").length;
   const failedChecks = checks.filter(c => !c.ok);
 
   return (
@@ -1163,67 +1224,79 @@ function StepPublish({ config, allPassed, checks, onDagResult, dagCache }: { con
         </div>
       </div>
 
-      {/* AI Audit Report (Humanized DAG) */}
+      {/* AI Audit with Business DAG */}
       <div className="rounded-2xl border border-primary/10 bg-white p-6">
-        <div className="flex items-center justify-between mb-4">
+        {businessNodes.length > 0 ? (
+          <AuditBusinessDagInline
+            nodes={businessNodes}
+            loading={dagLoading}
+            fromCache={fromCache}
+            isCacheValid={isCacheValid}
+            onForceRerun={() => runAuditCheck(true)}
+          />
+        ) : (
           <div>
-            <h3 className="text-lg font-bold text-primary">AI 质量审核</h3>
-            <p className="text-xs text-ink/50">AI 多维度评估任务配置的合理性和完整性</p>
-          </div>
-          <div className="flex items-center gap-2">
-            {isCacheValid && <span className="text-[10px] text-ink/30 bg-surface rounded px-2 py-0.5">已缓存</span>}
-            <button onClick={runDagCheck} disabled={dagLoading} className={`rounded-xl px-4 py-2 text-sm font-bold transition ${dagLoading ? "bg-accent/50 text-white cursor-wait" : isCacheValid ? "border border-accent/30 text-accent hover:bg-accent/5" : "bg-accent text-white hover:bg-accent/90"}`}>
-              {dagLoading ? "审核中…" : isCacheValid ? "重新审核" : "开始审核"}
-            </button>
-          </div>
-        </div>
-
-        {dagLoading && (
-          <div className="py-8 flex flex-col items-center gap-3">
-            <div className="h-6 w-6 animate-spin rounded-full border-2 border-accent/30 border-t-accent" />
-            <p className="text-sm text-ink/50">AI 正在从多个维度评估您的任务配置…</p>
-          </div>
-        )}
-
-        {dagResult && !dagLoading && (
-          <div className="space-y-4">
-            {/* Score Summary */}
-            <div className="rounded-xl bg-surface/40 p-4 flex items-center gap-4">
-              <span className={`flex h-12 w-12 items-center justify-center rounded-full text-lg font-bold ${dagResult.allPassed ? "bg-success/15 text-success" : "bg-warning/15 text-warning"}`}>
-                {passedCount}/{visibleStages.length}
-              </span>
+            <div className="flex items-center justify-between mb-4">
               <div>
-                <p className="text-sm font-bold text-primary">{dagResult.allPassed ? "审核通过，可以安全发布" : "部分维度需要关注"}</p>
-                <p className="text-xs text-ink/40">共 {visibleStages.length} 项检查，{passedCount} 项合格，耗时 {(totalMs / 1000).toFixed(1)} 秒</p>
+                <h3 className="text-lg font-bold text-primary">AI 质量审核</h3>
+                <p className="text-xs text-ink/50">基于知识库和规则对任务配置进行多维度评估</p>
               </div>
+              <button onClick={() => runAuditCheck(false)} disabled={dagLoading} className="rounded-xl bg-accent px-4 py-2 text-sm font-bold text-white hover:bg-accent/90 disabled:opacity-50">
+                {dagLoading ? "审核中…" : "开始审核"}
+              </button>
             </div>
-
-            {/* Human-readable checklist */}
-            <div className="space-y-2">
-              {dagResult.stages.filter(s => s.stage !== "skill_loader").map((s, idx) => (
-                <div key={s.stage} className={`rounded-xl px-4 py-3 ${s.status === "success" ? "bg-success/5" : "bg-warning/5 border border-warning/15"}`}>
-                  <div className="flex items-center gap-3">
-                    <span className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold ${s.status === "success" ? "bg-success/15 text-success" : "bg-warning/15 text-warning"}`}>
-                      {s.status === "success" ? "\u2713" : "!"}
-                    </span>
-                    <span className="text-sm font-bold text-primary">{idx + 1}. {AUDIT_LABELS[s.stage] || s.stage}</span>
-                    <span className={`ml-auto text-xs font-bold ${s.status === "success" ? "text-success" : "text-warning"}`}>{s.status === "success" ? "通过" : "需关注"}</span>
-                  </div>
-                  <p className="mt-1.5 ml-9 text-xs text-ink/60 leading-relaxed">{s.summary}</p>
-                </div>
-              ))}
-            </div>
-
+            {dagLoading && (
+              <div className="py-8 flex flex-col items-center gap-3">
+                <div className="h-6 w-6 animate-spin rounded-full border-2 border-accent/30 border-t-accent" />
+                <p className="text-sm text-ink/50">AI 正在从多个维度评估您的任务配置…</p>
+              </div>
+            )}
           </div>
         )}
       </div>
+
+      {/* Developer Trace Toggle */}
+      {traceNodes.length > 0 && (
+        <div className="rounded-2xl border border-primary/10 bg-white p-6">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h3 className="text-sm font-bold text-primary">开发者视图</h3>
+              <p className="text-[10px] text-ink/40 font-mono">traceId: {traceId}</p>
+            </div>
+            <button onClick={() => setShowDevTrace(!showDevTrace)} className="text-xs text-accent font-bold hover:underline">
+              {showDevTrace ? "收起" : "展开 Agent Trace"}
+            </button>
+          </div>
+          {showDevTrace && (
+            <div className="space-y-2">
+              {traceNodes.map(node => (
+                <div key={node.id} className="rounded-lg border border-primary/10 px-3 py-2 text-xs">
+                  <div className="flex items-center gap-2">
+                    <span className="bg-purple-50 text-purple-700 rounded px-1.5 py-0.5 text-[10px] font-mono">{node.type}</span>
+                    <span className="font-bold text-primary">{node.title}</span>
+                    <span className="ml-auto text-ink/30 font-mono">{node.durationMs}ms</span>
+                    <span className={`h-2 w-2 rounded-full ${node.status === "success" ? "bg-success" : "bg-warning"}`} />
+                  </div>
+                  {node.rag && Boolean((node.rag as Record<string, unknown>).hasContent) && (
+                    <p className="mt-1 text-[10px] text-emerald-600">RAG: 已召回知识</p>
+                  )}
+                  {node.skill && Boolean((node.skill as Record<string, unknown>).used) && (
+                    <p className="mt-1 text-[10px] text-orange-600">Skills: {((node.skill as Record<string, unknown>).skills as string[] || []).join(", ")}</p>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Task Package Quick Preview */}
       <div className="rounded-2xl border border-primary/10 bg-white p-6">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-bold text-primary">任务包预览</h3>
           <div className="flex items-center gap-2">
-            <button onClick={() => { const pkg = JSON.stringify({ taskId: config.taskId, title: config.taskName, instruction: config.instruction, schema: { components: config.schemaComponents }, rubric: { dimensions: config.rubricDimensions, rules: config.rubricRules }, assignmentPolicy: config.assignmentPolicy, agentPolicy: config.agentPolicy, sampleItemCount: config.sampleData.length }, null, 2); const b = new Blob([pkg], { type: "application/json" }); const a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = `task-${config.taskId}.json`; a.click(); }} className="rounded-lg border border-accent/30 px-3 py-1.5 text-xs font-bold text-accent hover:bg-accent/5">导出文件</button>
+            <button onClick={() => { const pkg = JSON.stringify({ taskId: config.taskId, title: config.taskName, instruction: config.instruction, schema: { components: config.schemaComponents }, rubric: { dimensions: config.rubricDimensions, rules: config.rubricRules }, assignmentPolicy: config.assignmentPolicy, agentPolicy: config.agentPolicy, sampleItemCount: config.sampleData.length, sampleData: config.sampleData }, null, 2); const b = new Blob([pkg], { type: "application/json" }); const a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = `task-${config.taskId}.json`; a.click(); }} className="rounded-lg border border-accent/30 px-3 py-1.5 text-xs font-bold text-accent hover:bg-accent/5">导出 JSON</button>
+            <button onClick={() => { const csv = exportToCsv(config); const b = new Blob([csv], { type: "text/csv" }); const a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = `task-${config.taskId}.csv`; a.click(); }} className="rounded-lg border border-accent/30 px-3 py-1.5 text-xs font-bold text-accent hover:bg-accent/5">导出 CSV</button>
             <button onClick={() => { navigator.clipboard.writeText(JSON.stringify({ taskId: config.taskId, title: config.taskName, instruction: config.instruction, schema: { components: config.schemaComponents }, rubric: { dimensions: config.rubricDimensions, rules: config.rubricRules } }, null, 2)); setCopied(true); setTimeout(() => setCopied(false), 1500); }} className="rounded-lg border border-primary/15 px-3 py-1.5 text-xs font-bold text-primary hover:bg-surface/50">{copied ? "已复制" : "复制"}</button>
           </div>
         </div>
@@ -1245,6 +1318,79 @@ function StepPublish({ config, allPassed, checks, onDagResult, dagCache }: { con
       )}
     </div>
   );
+}
+
+function AuditBusinessDagInline({ nodes, loading, fromCache, isCacheValid, onForceRerun }: { nodes: { id: string; nodeKey: string; title: string; status: string; summary: string; evidence: string; impact: string; suggestion: string; referenceSources: string[]; fixStep: string; durationMs: number }[]; loading: boolean; fromCache: boolean; isCacheValid: boolean; onForceRerun: () => void }) {
+  const [expandedNode, setExpandedNode] = useState<string | null>(null);
+  const passedCount = nodes.filter(n => n.status === "success").length;
+  const allPassed = nodes.length > 0 && passedCount === nodes.length;
+  const totalMs = nodes.reduce((s, n) => s + n.durationMs, 0);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-lg font-bold text-primary">AI 质量审核</h3>
+          <p className="text-xs text-ink/50">基于知识库和规则对任务配置进行多维度评估</p>
+        </div>
+        <div className="flex items-center gap-2">
+          {fromCache && isCacheValid && <span className="text-[10px] text-success/70 bg-success/5 border border-success/10 rounded px-2 py-0.5">已使用上次审核结果</span>}
+          <button onClick={onForceRerun} disabled={loading} className={`rounded-xl px-4 py-2 text-sm font-bold transition ${loading ? "bg-accent/50 text-white cursor-wait" : "border border-accent/30 text-accent hover:bg-accent/5"}`}>
+            {loading ? "审核中…" : "手动重新审核"}
+          </button>
+        </div>
+      </div>
+
+      <div className="rounded-xl bg-surface/40 p-4 flex items-center gap-4">
+        <span className={`flex h-12 w-12 items-center justify-center rounded-full text-lg font-bold ${allPassed ? "bg-success/15 text-success" : "bg-warning/15 text-warning"}`}>
+          {passedCount}/{nodes.length}
+        </span>
+        <div>
+          <p className="text-sm font-bold text-primary">{allPassed ? "审核通过，可以安全发布" : "部分维度需要关注"}</p>
+          <p className="text-xs text-ink/40">共 {nodes.length} 项检查，{passedCount} 项合格，耗时 {(totalMs / 1000).toFixed(1)} 秒</p>
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        {nodes.map((node, idx) => (
+          <div key={node.id}>
+            {idx > 0 && <div className="ml-4 h-1 w-px bg-primary/10" />}
+            <button onClick={() => setExpandedNode(expandedNode === node.id ? null : node.id)} className={`w-full text-left rounded-xl px-4 py-3 transition-all ${node.status === "success" ? "bg-success/5 hover:bg-success/10" : "bg-warning/5 border border-warning/15 hover:bg-warning/10"} ${expandedNode === node.id ? "ring-2 ring-accent/30" : ""}`}>
+              <div className="flex items-center gap-3">
+                <span className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold ${node.status === "success" ? "bg-success/15 text-success" : "bg-warning/15 text-warning"}`}>{node.status === "success" ? "\u2713" : "!"}</span>
+                <div className="flex-1 min-w-0">
+                  <span className="text-sm font-bold text-primary">{node.title}</span>
+                  <p className="text-xs text-ink/60 truncate">{node.summary}</p>
+                </div>
+                <span className={`text-xs font-bold shrink-0 ${node.status === "success" ? "text-success" : "text-warning"}`}>{node.status === "success" ? "通过" : "需关注"}</span>
+              </div>
+            </button>
+            {expandedNode === node.id && (
+              <div className="ml-10 mt-1 mb-2 rounded-xl border border-primary/10 bg-white p-4 space-y-2 shadow-sm">
+                {node.evidence && <div><p className="text-[10px] font-bold text-ink/40">参考依据</p><p className="text-xs text-ink/70">{node.evidence}</p></div>}
+                {node.impact && <div><p className="text-[10px] font-bold text-ink/40">影响</p><p className="text-xs text-warning">{node.impact}</p></div>}
+                {node.suggestion && <div><p className="text-[10px] font-bold text-ink/40">建议</p><p className="text-xs text-ink/70">{node.suggestion}</p></div>}
+                {node.referenceSources.length > 0 && node.referenceSources[0] !== "" && (
+                  <div className="flex flex-wrap gap-1">{node.referenceSources.map((src, i) => <span key={i} className="text-[10px] bg-accent/5 text-accent border border-accent/10 rounded px-2 py-0.5">{src}</span>)}</div>
+                )}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function exportToCsv(config: TaskConfig): string {
+  if (config.sampleData.length === 0) return "";
+  const headers = Object.keys(config.sampleData[0]);
+  const rows = config.sampleData.map(row => headers.map(h => {
+    const val = row[h];
+    const str = typeof val === "object" ? JSON.stringify(val) : String(val ?? "");
+    return `"${str.replace(/"/g, '""')}"`;
+  }).join(","));
+  return [headers.join(","), ...rows].join("\n");
 }
 
 function SummaryItem({ label, value }: { label: string; value: string }) {

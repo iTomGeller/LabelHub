@@ -1,7 +1,14 @@
 ---
 name: dataset-profile
-version: 0.1.0
+version: 0.2.0
 description: Profile imported data before task publishing.
+triggers:
+  - dataset_sampler
+  - data_quality_check
+outputSchema:
+  - dataFindings
+  - fieldStats
+  - warnings
 ---
 
 # Dataset Profile Skill
