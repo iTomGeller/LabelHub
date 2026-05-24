@@ -79,8 +79,13 @@ public class DeepSeekService {
             String taskId,
             String taskName,
             String instruction,
-            List<Map<String, Object>> sampleData
-    ) {}
+            List<Map<String, Object>> sampleData,
+            String ragContext
+    ) {
+        public GenerateTaskConfigRequest(String taskId, String taskName, String instruction, List<Map<String, Object>> sampleData) {
+            this(taskId, taskName, instruction, sampleData, null);
+        }
+    }
 
     public record GenerateTaskConfigResponse(
             String taskId,
@@ -117,7 +122,7 @@ public class DeepSeekService {
             samplePreview = "无法序列化样例数据";
         }
 
-        String systemPrompt = """
+        String baseSystemPrompt = """
                 你是 LabelHub 的任务配置 AI 助手。根据用户的任务描述和样例数据，生成完整的标注任务配置。
                 
                 你必须返回一个合法 JSON 对象（不要用 markdown code block），包含以下字段：
@@ -130,6 +135,10 @@ public class DeepSeekService {
                 - assignmentPolicy: {mode: "auto_claim", replicasPerItem: 1, deadlineHours: 24, quotaPerLabeler: 50}
                 - agentPolicy: {precheckEnabled: true, confidenceThreshold: 0.8, modelPreference: "deepseek-chat", promptTemplateVersionId: "auto_v1"}
                 - rationale: 一段中文说明，解释你为什么这样配置""";
+
+        String systemPrompt = (request.ragContext() != null && !request.ragContext().isBlank())
+                ? baseSystemPrompt + "\n\n以下是平台的专业知识约束，你生成的配置必须严格遵守：\n" + request.ragContext()
+                : baseSystemPrompt;
 
         String userPrompt = """
                 任务名称：%s
@@ -293,7 +302,15 @@ public class DeepSeekService {
     }
 
     public List<Map<String, Object>> generateSampleData(String taskName, String instruction, int count) {
+        return generateSampleData(taskName, instruction, count, null);
+    }
+
+    public List<Map<String, Object>> generateSampleData(String taskName, String instruction, int count, String ragContext) {
         agentMetrics.recordAgentCall("sample-gen", "start", 0);
+
+        String ragSuffix = (ragContext != null && !ragContext.isBlank())
+                ? "\n\n平台数据规范（必须遵守）：\n" + ragContext
+                : "";
 
         String prompt = String.format("""
                 你是一个数据标注平台的样例数据生成助手。
@@ -314,7 +331,7 @@ public class DeepSeekService {
 
                 返回格式:
                 [{"id":"sample_001","content":"...","metadata":{"source":"...","created_at":"2026-05-20"}}]
-                """, taskName, instruction != null ? instruction : "无", count);
+                %s""", taskName, instruction != null ? instruction : "无", count, ragSuffix);
 
         if (!enabled) {
             return fallbackSampleData(taskName, count);
@@ -364,6 +381,89 @@ public class DeepSeekService {
             return fallbackSampleData(taskName, count);
         }
     }
+
+    public AiGenerateFieldResult generateField(String taskName, String instruction, List<String> existingFields, List<Map<String, Object>> sampleData) {
+        return generateField(taskName, instruction, existingFields, sampleData, null);
+    }
+
+    public AiGenerateFieldResult generateField(String taskName, String instruction, List<String> existingFields, List<Map<String, Object>> sampleData, String ragContext) {
+        String fieldListStr = existingFields.isEmpty() ? "无" : String.join(", ", existingFields);
+        String dataPreview;
+        try {
+            var subset = sampleData.stream().limit(3).toList();
+            dataPreview = objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(subset);
+        } catch (Exception e) {
+            dataPreview = "无法序列化";
+        }
+
+        String ragSuffix = (ragContext != null && !ragContext.isBlank())
+                ? "\n\n字段命名规范（必须遵守）：\n" + ragContext
+                : "";
+
+        String prompt = String.format("""
+                你是数据标注平台的字段生成助手。
+                任务名称: %s
+                任务说明: %s
+                现有字段: %s
+                样例数据（前3条）:
+                %s
+
+                请生成一个新的、有意义的字段（列），该字段应与任务主题相关，且不与现有字段重复。
+                返回一个 JSON 对象:
+                {"fieldName": "字段名称", "values": ["第1行的值", "第2行的值", ...]}
+                values 数组长度必须等于 %d（当前样例数据行数）。
+                只返回 JSON，不要其他文字。
+                %s""", taskName, instruction != null ? instruction : "无", fieldListStr, dataPreview, sampleData.size(), ragSuffix);
+
+        if (!enabled) {
+            String fallbackField = "priority";
+            if (existingFields.contains("priority")) fallbackField = "category";
+            if (existingFields.contains("category")) fallbackField = "difficulty";
+            List<String> values = sampleData.stream().map(r -> "中").toList();
+            return new AiGenerateFieldResult(fallbackField, values, "AI 未启用，已生成兜底字段");
+        }
+
+        long startMs = System.currentTimeMillis();
+        try {
+            Map<String, Object> body = Map.of(
+                    "model", model,
+                    "messages", List.of(Map.of("role", "user", "content", prompt)),
+                    "temperature", 0.7,
+                    "max_tokens", 1000
+            );
+
+            String raw = webClient.post()
+                    .uri("/chat/completions")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .bodyValue(body)
+                    .retrieve()
+                    .bodyToMono(String.class)
+                    .timeout(Duration.ofSeconds(20))
+                    .block();
+
+            long elapsed = System.currentTimeMillis() - startMs;
+            agentMetrics.recordAgentCall("field-gen", "success", elapsed);
+            callsSuccess.increment();
+            callLatency.record(Duration.ofMillis(elapsed));
+
+            JsonNode root = objectMapper.readTree(raw);
+            String content = root.path("choices").get(0).path("message").path("content").asText();
+            String cleaned = content.replaceAll("```json\\s*", "").replaceAll("```\\s*", "").trim();
+            JsonNode parsed = objectMapper.readTree(cleaned);
+            String fieldName = parsed.path("fieldName").asText("new_field");
+            List<String> values = objectMapper.convertValue(parsed.path("values"),
+                    objectMapper.getTypeFactory().constructCollectionType(List.class, String.class));
+            return new AiGenerateFieldResult(fieldName, values, "已生成字段「" + fieldName + "」");
+        } catch (Exception e) {
+            long elapsed = System.currentTimeMillis() - startMs;
+            agentMetrics.recordAgentCall("field-gen", "error", elapsed);
+            log.warn("Field generation failed: {}", e.getMessage());
+            List<String> values = sampleData.stream().map(r -> "").toList();
+            return new AiGenerateFieldResult("new_field", values, "生成失败，已创建空白字段");
+        }
+    }
+
+    public record AiGenerateFieldResult(String fieldName, List<String> values, String message) {}
 
     private List<Map<String, Object>> fallbackSampleData(String taskName, int count) {
         List<Map<String, Object>> all = List.of(

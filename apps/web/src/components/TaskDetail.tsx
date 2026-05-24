@@ -18,13 +18,12 @@ interface TaskPackageData {
 }
 
 const STAGE_LABELS: Record<string, string> = {
-  task_context_builder: "任务描述完整性",
-  skill_loader: "标注技能匹配",
-  dataset_sampler: "样例数据质量",
-  schema_generator: "标注模板合理性",
-  rubric_generator: "质检规则覆盖度",
-  critic: "综合质量评审",
-  task_package_writer: "发布就绪度",
+  task_context_builder: "任务说明",
+  dataset_sampler: "样例数据",
+  schema_generator: "标注模板",
+  rubric_generator: "质检规则",
+  critic: "综合评估",
+  task_package_writer: "发布准备",
 };
 
 export function TaskDetail({ taskId }: { taskId?: string }) {
@@ -138,7 +137,7 @@ export function TaskDetail({ taskId }: { taskId?: string }) {
             </div>
 
             <div className="space-y-2">
-              {dagReport.stages.map((s, idx) => (
+              {dagReport.stages.filter(s => s.stage !== "skill_loader").map((s, idx) => (
                 <div key={s.stage} className="flex items-start gap-3 rounded-xl bg-surface/30 px-4 py-3">
                   <span className={`mt-0.5 flex h-5 w-5 items-center justify-center rounded-full text-xs font-bold ${s.status === "success" ? "bg-success/15 text-success" : "bg-warning/15 text-warning"}`}>
                     {s.status === "success" ? "\u2713" : "!"}
@@ -146,7 +145,7 @@ export function TaskDetail({ taskId }: { taskId?: string }) {
                   <div className="flex-1">
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-bold text-primary">{idx + 1}. {STAGE_LABELS[s.stage] || s.stage}</span>
-                      <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${s.status === "success" ? "bg-success/10 text-success" : "bg-warning/10 text-warning"}`}>{s.status === "success" ? "通过" : "警告"}</span>
+                      <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${s.status === "success" ? "bg-success/10 text-success" : "bg-warning/10 text-warning"}`}>{s.status === "success" ? "通过" : "需关注"}</span>
                     </div>
                     <p className="mt-1 text-xs text-ink/60 leading-relaxed">{s.summary}</p>
                   </div>

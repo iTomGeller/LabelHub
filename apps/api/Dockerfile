@@ -8,5 +8,7 @@ RUN mvn -f apps/api/pom.xml clean package -DskipTests
 FROM eclipse-temurin:21-jre
 WORKDIR /app
 COPY --from=builder /app/apps/api/target/labelhub-api-0.1.0.jar app.jar
+COPY skills/ /app/skills/
+COPY docs/contracts/ /app/docs/contracts/
 EXPOSE 8080
 ENTRYPOINT ["java", "-jar", "/app/app.jar"]

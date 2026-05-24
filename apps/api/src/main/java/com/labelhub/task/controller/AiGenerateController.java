@@ -74,10 +74,12 @@ public class AiGenerateController {
     public ResponseEntity<SampleDataResponse> generateSampleData(@RequestBody SampleDataRequest request) {
         agentMetrics.recordPipelineStage("sample-gen-start", 0);
         int count = request.count() != null ? Math.max(1, Math.min(20, request.count())) : 6;
+        String ragContext = agentPipelineService.buildCompactRagContext();
         var samples = deepSeekService.generateSampleData(
                 request.taskName() != null ? request.taskName() : "未命名任务",
                 request.instruction(),
-                count
+                count,
+                ragContext
         );
         return ResponseEntity.ok(new SampleDataResponse(samples,
                 "已根据任务「" + request.taskName() + "」生成 " + samples.size() + " 条样例数据"));
@@ -93,6 +95,22 @@ public class AiGenerateController {
                 request.instruction() != null ? request.instruction() : "",
                 request.sampleData() != null ? request.sampleData() : List.of()
         ));
+        return ResponseEntity.ok(result);
+    }
+
+    public record GenerateFieldsRequest(String taskName, String instruction, List<String> existingFields, List<Map<String, Object>> sampleData, Integer count) {}
+
+    @PostMapping("/generate-fields")
+    public ResponseEntity<DeepSeekService.AiGenerateFieldResult> generateFields(@RequestBody GenerateFieldsRequest request) {
+        agentMetrics.recordPipelineStage("field-gen-start", 0);
+        String ragContext = agentPipelineService.buildCompactRagContext();
+        var result = deepSeekService.generateField(
+                request.taskName() != null ? request.taskName() : "未命名任务",
+                request.instruction(),
+                request.existingFields() != null ? request.existingFields() : List.of(),
+                request.sampleData() != null ? request.sampleData() : List.of(),
+                ragContext
+        );
         return ResponseEntity.ok(result);
     }
 }

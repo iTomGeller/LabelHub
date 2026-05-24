@@ -193,6 +193,12 @@ const COMPONENT_PRESETS: SchemaComponent[] = [
   { id: "", type: "fileUpload", label: "截图上传", dataPath: "$.annotation.files", required: false, props: { accept: ["image/png", "image/jpeg"], maxFiles: 3 }, validation: [] },
 ];
 
+type DagResultType = { pipelineId: string; stages: { stage: string; status: string; durationMs: number; output: Record<string, unknown>; summary: string }[]; allPassed: boolean };
+
+function getConfigHash(config: TaskConfig): string {
+  return `${config.taskName}|${config.instruction.slice(0, 50)}|${config.sampleData.length}|${config.schemaComponents.length}|${config.rubricRules.length}|${config.rubricDimensions.length}`;
+}
+
 export function TaskStepper({ taskId }: { taskId?: string }) {
   const [step, setStep] = useState<StepKey>("upload");
   const [config, setConfig] = useState<TaskConfig>(() => loadConfigForTask(taskId));
@@ -201,6 +207,7 @@ export function TaskStepper({ taskId }: { taskId?: string }) {
   const [published, setPublished] = useState(false);
   const [dagPassed, setDagPassed] = useState(false);
   const [dagReport, setDagReport] = useState<{ pipelineId: string; allPassed: boolean; totalMs: number; stages: { stage: string; status: string; durationMs: number; summary: string }[] } | null>(null);
+  const [dagCache, setDagCache] = useState<{ hash: string; result: DagResultType } | null>(null);
   const currentIdx = STEPS.findIndex((s) => s.key === step);
 
   function goNext() {
@@ -342,7 +349,7 @@ export function TaskStepper({ taskId }: { taskId?: string }) {
       {step === "upload" && <StepUpload config={config} setConfig={setConfig} onAiGenerate={handleAiGenerate} loading={loading} />}
       {step === "template" && <StepTemplate config={config} setConfig={setConfig} />}
       {step === "rules" && <StepRules config={config} setConfig={setConfig} />}
-      {step === "publish" && <StepPublish config={config} allPassed={allPassed} checks={checks} onDagResult={(passed, report) => { setDagPassed(passed); if (report) setDagReport(report); }} />}
+      {step === "publish" && <StepPublish config={config} allPassed={allPassed} checks={checks} dagCache={dagCache} onDagResult={(passed, report) => { setDagPassed(passed); if (report) setDagReport(report); setDagCache({ hash: getConfigHash(config), result: { pipelineId: report?.pipelineId || "", stages: (report?.stages || []).map(s => ({ ...s, output: {} })), allPassed: passed } }); }} />}
 
       <div className="flex items-center justify-between">
         <button onClick={goPrev} disabled={currentIdx === 0} className={`rounded-xl border border-primary/20 px-5 py-2.5 text-sm font-bold ${currentIdx === 0 ? "cursor-not-allowed text-ink/30" : "text-primary hover:border-accent"}`}>上一步</button>
@@ -507,7 +514,10 @@ function DataPreviewTable({ data, setConfig, taskName, instruction }: { data: Re
   const fields = Object.keys(data[0] || {});
   const [page, setPage] = useState(0);
   const [aiAppendLoading, setAiAppendLoading] = useState(false);
+  const [aiFieldLoading, setAiFieldLoading] = useState(false);
   const [appendCount, setAppendCount] = useState(3);
+  const [newFieldName, setNewFieldName] = useState("");
+  const [showAddField, setShowAddField] = useState(false);
   const pageSize = 10;
   const totalPages = Math.ceil(data.length / pageSize);
   const pageData = data.slice(page * pageSize, (page + 1) * pageSize);
@@ -525,14 +535,50 @@ function DataPreviewTable({ data, setConfig, taskName, instruction }: { data: Re
     setPage(Math.floor(data.length / pageSize));
   }
 
-  async function handleAiAppend() {
+  function handleAddColumn() {
+    const name = newFieldName.trim();
+    if (!name || fields.includes(name)) return;
+    setConfig((prev) => ({ ...prev, sampleData: prev.sampleData.map((row) => ({ ...row, [name]: "" })) }));
+    setNewFieldName("");
+    setShowAddField(false);
+  }
+
+  function handleRemoveColumn(field: string) {
+    if (field === "id") return;
+    setConfig((prev) => ({ ...prev, sampleData: prev.sampleData.map((row) => { const { [field]: _, ...rest } = row as Record<string, unknown>; return rest; }) }));
+  }
+
+  async function handleAiGenerateField() {
+    if (!taskName.trim() || data.length === 0) return;
+    setAiFieldLoading(true);
+    try {
+      const res = await fetch("/agent-api/agents/generate-fields", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ taskName, instruction: instruction || null, existingFields: fields, sampleData: data.slice(0, 10) }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const result = await res.json();
+      if (result.fieldName && result.values) {
+        const fname = result.fieldName;
+        setConfig((prev) => ({ ...prev, sampleData: prev.sampleData.map((row, i) => ({ ...row, [fname]: result.values[i] || "" })) }));
+      }
+    } catch (e) {
+      alert("AI 字段生成失败: " + (e instanceof Error ? e.message : "未知错误"));
+    } finally {
+      setAiFieldLoading(false);
+    }
+  }
+
+  async function handleAiAppend(countOverride?: number) {
     if (!taskName.trim()) return;
     setAiAppendLoading(true);
+    const count = countOverride ?? appendCount;
     try {
       const res = await fetch("/agent-api/agents/generate-sample-data", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ taskName, instruction: instruction || null, count: appendCount }),
+        body: JSON.stringify({ taskName, instruction: instruction || null, count }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const result = await res.json();
@@ -558,12 +604,36 @@ function DataPreviewTable({ data, setConfig, taskName, instruction }: { data: Re
           <span className="rounded-full bg-success/10 px-3 py-1 text-xs font-bold text-success">数据就绪</span>
         </div>
       </div>
+
+      {/* Column Management Bar */}
+      <div className="mb-3 flex items-center gap-2 flex-wrap">
+        {showAddField ? (
+          <div className="flex items-center gap-1.5 rounded-lg border border-accent/30 bg-accent/5 px-2 py-1">
+            <input type="text" value={newFieldName} onChange={(e) => setNewFieldName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") handleAddColumn(); }} placeholder="字段名" className="w-24 border-none bg-transparent text-xs focus:outline-none" autoFocus />
+            <button onClick={handleAddColumn} disabled={!newFieldName.trim() || fields.includes(newFieldName.trim())} className="rounded px-2 py-0.5 text-xs font-bold text-white bg-accent disabled:bg-accent/40">确定</button>
+            <button onClick={() => { setShowAddField(false); setNewFieldName(""); }} className="text-xs text-ink/40 hover:text-ink/60">取消</button>
+          </div>
+        ) : (
+          <button onClick={() => setShowAddField(true)} className="rounded-lg border border-dashed border-primary/20 px-3 py-1.5 text-xs text-ink/50 hover:text-primary hover:border-primary/30 transition">+ 新增字段</button>
+        )}
+        <button onClick={handleAiGenerateField} disabled={aiFieldLoading || !taskName.trim() || data.length === 0} className={`rounded-lg px-3 py-1.5 text-xs font-bold transition ${aiFieldLoading ? "bg-accent/40 text-white cursor-wait" : "border border-accent/30 text-accent hover:bg-accent/5"}`}>
+          {aiFieldLoading ? "生成中…" : "AI 生成字段"}
+        </button>
+      </div>
+
       <div className="overflow-x-auto rounded-xl border border-primary/10">
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-surface/80">
               <th className="px-2 py-2 text-center text-xs font-bold text-ink/40 w-8">#</th>
-              {fields.map((f) => <th key={f} className="px-3 py-2 text-left text-xs font-bold text-ink/60 whitespace-nowrap">{f}</th>)}
+              {fields.map((f) => (
+                <th key={f} className="px-3 py-2 text-left text-xs font-bold text-ink/60 whitespace-nowrap group/col relative">
+                  {f}
+                  {f !== "id" && (
+                    <button onClick={() => handleRemoveColumn(f)} className="absolute -top-0.5 -right-0.5 opacity-0 group-hover/col:opacity-100 flex h-4 w-4 items-center justify-center rounded-full bg-red-100 text-red-500 text-[9px] transition hover:bg-red-200" title={`删除字段 ${f}`}>&times;</button>
+                  )}
+                </th>
+              ))}
               <th className="px-2 py-2 text-center text-xs font-bold text-ink/40 w-10">操作</th>
             </tr>
           </thead>
@@ -599,12 +669,12 @@ function DataPreviewTable({ data, setConfig, taskName, instruction }: { data: Re
       )}
 
       <div className="mt-4 flex items-center gap-3 flex-wrap">
-        <button onClick={() => { setAppendCount(1); handleAiAppend(); }} disabled={aiAppendLoading || !taskName.trim()} className="rounded-xl border border-dashed border-accent/30 px-4 py-2 text-sm text-accent hover:bg-accent/5 transition disabled:opacity-40">+ AI 智能生成 1 行</button>
+        <button onClick={() => handleAiAppend(1)} disabled={aiAppendLoading || !taskName.trim()} className="rounded-xl border border-dashed border-accent/30 px-4 py-2 text-sm text-accent hover:bg-accent/5 transition disabled:opacity-40">+ AI 智能生成 1 行</button>
         <div className="flex items-center gap-2 rounded-xl border border-accent/20 bg-accent/5 px-3 py-1.5">
           <span className="text-xs text-ink/60">批量生成</span>
           <input type="number" min={1} max={20} value={appendCount} onChange={(e) => setAppendCount(Math.max(1, Math.min(20, parseInt(e.target.value) || 1)))} className="w-12 rounded-lg border border-primary/15 px-2 py-1 text-xs text-center" />
           <span className="text-xs text-ink/60">条</span>
-          <button onClick={handleAiAppend} disabled={aiAppendLoading || !taskName.trim()} className={`rounded-lg px-3 py-1 text-xs font-bold text-white transition ${aiAppendLoading || !taskName.trim() ? "bg-accent/40 cursor-not-allowed" : "bg-accent hover:bg-accent/90"}`}>
+          <button onClick={() => handleAiAppend()} disabled={aiAppendLoading || !taskName.trim()} className={`rounded-lg px-3 py-1 text-xs font-bold text-white transition ${aiAppendLoading || !taskName.trim() ? "bg-accent/40 cursor-not-allowed" : "bg-accent hover:bg-accent/90"}`}>
             {aiAppendLoading ? "生成中…" : "AI 生成"}
           </button>
         </div>
@@ -1005,27 +1075,19 @@ function RuleCard({ rule, idx, components, updateRule, removeRule }: { rule: Rub
 
 /* ─── Step 4: Publish ─── */
 
-function getConfigHash(config: TaskConfig): string {
-  return `${config.taskName}|${config.instruction.slice(0, 50)}|${config.sampleData.length}|${config.schemaComponents.length}|${config.rubricRules.length}|${config.rubricDimensions.length}`;
-}
-
 const AUDIT_LABELS: Record<string, string> = {
-  task_context_builder: "任务描述完整性",
-  skill_loader: "标注技能匹配",
-  dataset_sampler: "样例数据质量",
-  schema_generator: "标注模板合理性",
-  rubric_generator: "质检规则覆盖度",
-  critic: "综合质量评审",
-  task_package_writer: "发布就绪度",
+  task_context_builder: "任务说明",
+  dataset_sampler: "样例数据",
+  schema_generator: "标注模板",
+  rubric_generator: "质检规则",
+  critic: "综合评估",
+  task_package_writer: "发布准备",
 };
 
-type DagResultType = { pipelineId: string; stages: { stage: string; status: string; durationMs: number; output: Record<string, unknown>; summary: string }[]; allPassed: boolean; pipelineLog?: { skillsLoaded: string[]; modelUsed: string; promptSnapshot: string } };
-
-function StepPublish({ config, allPassed, checks, onDagResult }: { config: TaskConfig; allPassed: boolean; checks: { label: string; ok: boolean; step?: StepKey; hint?: string }[]; onDagResult: (passed: boolean, report?: { pipelineId: string; allPassed: boolean; totalMs: number; stages: { stage: string; status: string; durationMs: number; summary: string }[] }) => void }) {
+function StepPublish({ config, allPassed, checks, onDagResult, dagCache }: { config: TaskConfig; allPassed: boolean; checks: { label: string; ok: boolean; step?: StepKey; hint?: string }[]; onDagResult: (passed: boolean, report?: { pipelineId: string; allPassed: boolean; totalMs: number; stages: { stage: string; status: string; durationMs: number; summary: string }[] }) => void; dagCache: { hash: string; result: DagResultType } | null }) {
   const [dagLoading, setDagLoading] = useState(false);
-  const [dagResult, setDagResult] = useState<DagResultType | null>(null);
-  const [dagHash, setDagHash] = useState<string>("");
-  const [showTechLog, setShowTechLog] = useState(false);
+  const [dagResult, setDagResult] = useState<DagResultType | null>(dagCache?.result || null);
+  const [dagHash, setDagHash] = useState<string>(dagCache?.hash || "");
   const [copied, setCopied] = useState(false);
 
   const currentHash = getConfigHash(config);
@@ -1045,6 +1107,14 @@ function StepPublish({ config, allPassed, checks, onDagResult }: { config: TaskC
   }
 
   useEffect(() => {
+    const hash = getConfigHash(config);
+    if (dagCache && dagCache.hash === hash) {
+      setDagResult(dagCache.result);
+      setDagHash(hash);
+      const totalMs = dagCache.result.stages?.reduce((s: number, x: { durationMs: number }) => s + x.durationMs, 0) || 0;
+      onDagResult(dagCache.result.allPassed === true, { pipelineId: dagCache.result.pipelineId, allPassed: dagCache.result.allPassed, totalMs, stages: dagCache.result.stages.map(s => ({ stage: s.stage, status: s.status, durationMs: s.durationMs, summary: s.summary })) });
+      return;
+    }
     if (!dagResult && !dagLoading && config.taskName.trim()) {
       runDagCheck();
     }
@@ -1052,8 +1122,9 @@ function StepPublish({ config, allPassed, checks, onDagResult }: { config: TaskC
 
   const isCacheValid = dagHash === currentHash && dagResult !== null;
   const canPublish = allPassed && dagResult?.allPassed === true;
-  const totalMs = dagResult?.stages.reduce((s, x) => s + x.durationMs, 0) || 0;
-  const passedCount = dagResult?.stages.filter(s => s.status === "success").length || 0;
+  const visibleStages = dagResult?.stages.filter(s => s.stage !== "skill_loader") || [];
+  const totalMs = visibleStages.reduce((s, x) => s + x.durationMs, 0);
+  const passedCount = visibleStages.filter(s => s.status === "success").length;
   const failedChecks = checks.filter(c => !c.ok);
 
   return (
@@ -1097,7 +1168,7 @@ function StepPublish({ config, allPassed, checks, onDagResult }: { config: TaskC
         <div className="flex items-center justify-between mb-4">
           <div>
             <h3 className="text-lg font-bold text-primary">AI 质量审核</h3>
-            <p className="text-xs text-ink/50">AI 从 7 个维度评估任务配置的合理性和完整性</p>
+            <p className="text-xs text-ink/50">AI 多维度评估任务配置的合理性和完整性</p>
           </div>
           <div className="flex items-center gap-2">
             {isCacheValid && <span className="text-[10px] text-ink/30 bg-surface rounded px-2 py-0.5">已缓存</span>}
@@ -1119,44 +1190,30 @@ function StepPublish({ config, allPassed, checks, onDagResult }: { config: TaskC
             {/* Score Summary */}
             <div className="rounded-xl bg-surface/40 p-4 flex items-center gap-4">
               <span className={`flex h-12 w-12 items-center justify-center rounded-full text-lg font-bold ${dagResult.allPassed ? "bg-success/15 text-success" : "bg-warning/15 text-warning"}`}>
-                {passedCount}/{dagResult.stages.length}
+                {passedCount}/{visibleStages.length}
               </span>
               <div>
                 <p className="text-sm font-bold text-primary">{dagResult.allPassed ? "审核通过，可以安全发布" : "部分维度需要关注"}</p>
-                <p className="text-xs text-ink/40">共 {dagResult.stages.length} 项检查，{passedCount} 项合格，耗时 {(totalMs / 1000).toFixed(1)} 秒</p>
+                <p className="text-xs text-ink/40">共 {visibleStages.length} 项检查，{passedCount} 项合格，耗时 {(totalMs / 1000).toFixed(1)} 秒</p>
               </div>
             </div>
 
             {/* Human-readable checklist */}
             <div className="space-y-2">
-              {dagResult.stages.map((s, idx) => (
+              {dagResult.stages.filter(s => s.stage !== "skill_loader").map((s, idx) => (
                 <div key={s.stage} className={`rounded-xl px-4 py-3 ${s.status === "success" ? "bg-success/5" : "bg-warning/5 border border-warning/15"}`}>
                   <div className="flex items-center gap-3">
                     <span className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold ${s.status === "success" ? "bg-success/15 text-success" : "bg-warning/15 text-warning"}`}>
                       {s.status === "success" ? "\u2713" : "!"}
                     </span>
                     <span className="text-sm font-bold text-primary">{idx + 1}. {AUDIT_LABELS[s.stage] || s.stage}</span>
-                    <span className={`ml-auto text-xs font-bold ${s.status === "success" ? "text-success" : "text-warning"}`}>{s.status === "success" ? "通过" : "警告"}</span>
+                    <span className={`ml-auto text-xs font-bold ${s.status === "success" ? "text-success" : "text-warning"}`}>{s.status === "success" ? "通过" : "需关注"}</span>
                   </div>
                   <p className="mt-1.5 ml-9 text-xs text-ink/60 leading-relaxed">{s.summary}</p>
                 </div>
               ))}
             </div>
 
-            {/* Tech Log (collapsed by default) */}
-            <div className="pt-2 border-t border-primary/5">
-              <button onClick={() => setShowTechLog(!showTechLog)} className="text-xs text-ink/30 hover:text-ink/50 transition">
-                {showTechLog ? "收起技术日志" : "查看技术日志 (开发者)"}
-              </button>
-              {showTechLog && dagResult.pipelineLog && (
-                <div className="mt-2 rounded-lg bg-surface/30 p-3 text-[11px] text-ink/40 space-y-1">
-                  <p>Pipeline ID: {dagResult.pipelineId}</p>
-                  <p>Model: {dagResult.pipelineLog.modelUsed}</p>
-                  <p>Skills: {dagResult.pipelineLog.skillsLoaded?.join(", ")}</p>
-                  <p>Duration: {totalMs}ms</p>
-                </div>
-              )}
-            </div>
           </div>
         )}
       </div>

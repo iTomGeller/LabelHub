@@ -18,35 +18,29 @@ public class AgentPipelineService {
     private final DeepSeekService deepSeekService;
     private final AgentMetrics agentMetrics;
     private final String skillsDir;
+    private final String contractsDir;
 
     public AgentPipelineService(
             DeepSeekService deepSeekService,
             AgentMetrics agentMetrics,
-            @Value("${labelhub.skills-dir:skills}") String skillsDir
+            @Value("${labelhub.skills-dir:skills}") String skillsDir,
+            @Value("${labelhub.contracts-dir:docs/contracts}") String contractsDir
     ) {
         this.deepSeekService = deepSeekService;
         this.agentMetrics = agentMetrics;
         this.skillsDir = skillsDir;
+        this.contractsDir = contractsDir;
     }
 
     public record PipelineRequest(String taskName, String instruction, List<Map<String, Object>> sampleData) {}
 
     public record StageResult(String stage, String status, long durationMs, Map<String, Object> output, String summary) {}
 
-    public record PipelineLog(
-            String promptSnapshot,
-            int tokensUsed,
-            List<String> skillsLoaded,
-            String modelUsed,
-            String ragContext
-    ) {}
-
     public record PipelineResponse(
             String pipelineId,
             List<StageResult> stages,
             boolean allPassed,
-            Map<String, Object> taskPackage,
-            PipelineLog pipelineLog
+            Map<String, Object> taskPackage
     ) {}
 
     public PipelineResponse executePipeline(PipelineRequest request) {
@@ -72,11 +66,10 @@ public class AgentPipelineService {
         agentMetrics.recordAgentCall("task-context-builder", "success", ctxDuration);
         agentMetrics.recordPipelineStage("task_context_builder", ctxDuration);
 
-        String ctxSummary = String.format("任务「%s」上下文已组装：%s，样例数据 %d 条",
-                taskName.isEmpty() ? "未命名" : taskName,
-                instruction.isBlank() ? "无任务说明" : "含任务说明",
-                sampleCount);
-        stages.add(new StageResult("task_context_builder", "success", ctxDuration, ctxOutput, ctxSummary));
+        String ctxSummary = instruction.isBlank()
+                ? "请补充任务说明，明确标注目标和判断标准"
+                : String.format("任务说明已填写，包含明确的标注目标。已关联 %d 条样例数据", sampleCount);
+        stages.add(new StageResult("task_context_builder", instruction.isBlank() ? "warning" : "success", ctxDuration, ctxOutput, ctxSummary));
 
         // Stage 2: skill_loader
         stageStart = System.currentTimeMillis();
@@ -92,16 +85,14 @@ public class AgentPipelineService {
         agentMetrics.recordAgentCall("skill-loader", "success", skillDuration);
         agentMetrics.recordPipelineStage("skill_loader", skillDuration);
 
-        String skillSummary = String.format("已加载 %d 个专业技能：%s；RAG 上下文 %d 字符已注入 prompt",
-                loadedSkills.size(), String.join("、", skillNames), ragContext.length());
-        stages.add(new StageResult("skill_loader", "success", skillDuration, skillOutput, skillSummary));
+        // skill_loader runs internally but is NOT exposed to end users
 
         // Stage 3: dataset_sampler
         stageStart = System.currentTimeMillis();
         List<Map<String, Object>> sampleData = request.sampleData();
         boolean generated = false;
         if (sampleData == null || sampleData.isEmpty()) {
-            sampleData = deepSeekService.generateSampleData(taskName, instruction, 6);
+            sampleData = deepSeekService.generateSampleData(taskName, instruction, 6, buildCompactRagContext());
             generated = true;
         }
         List<String> fields = sampleData.isEmpty() ? List.of() : new ArrayList<>(sampleData.get(0).keySet());
@@ -114,17 +105,16 @@ public class AgentPipelineService {
         agentMetrics.recordAgentCall("dataset-sampler", "success", samplerDuration);
         agentMetrics.recordPipelineStage("dataset_sampler", samplerDuration);
 
-        String samplerSummary = String.format("%s %d 条样例数据，包含 %d 个字段（%s）",
-                generated ? "AI 已生成" : "已验证用户提供的",
-                sampleData.size(), fields.size(),
-                fields.size() > 3 ? String.join("、", fields.subList(0, 3)) + "等" : String.join("、", fields));
-        stages.add(new StageResult("dataset_sampler", "success", samplerDuration, samplerOutput, samplerSummary));
+        String fieldList = fields.size() > 3 ? String.join("、", fields.subList(0, 3)) + " 等" : String.join("、", fields);
+        String samplerSummary = String.format("样例数据共 %d 条，包含「%s」等 %d 个字段，数据结构完整", sampleData.size(), fieldList, fields.size());
+        stages.add(new StageResult("dataset_sampler", sampleData.size() >= 3 ? "success" : "warning", samplerDuration, samplerOutput, samplerSummary));
 
-        // Stage 4: schema_generator
+        // Stage 4: schema_generator (with RAG injection)
         stageStart = System.currentTimeMillis();
+        String fullRagContext = buildFullRagContext(ragContext);
         var configResult = deepSeekService.generateTaskConfig(
                 new DeepSeekService.GenerateTaskConfigRequest(
-                        "task_" + System.currentTimeMillis(), taskName, instruction, sampleData
+                        "task_" + System.currentTimeMillis(), taskName, instruction, sampleData, fullRagContext
                 )
         );
         long schemaDuration = System.currentTimeMillis() - stageStart;
@@ -147,11 +137,10 @@ public class AgentPipelineService {
         String componentNames = components.stream()
                 .map(c -> String.valueOf(c.getOrDefault("label", "")))
                 .limit(4).collect(Collectors.joining("、"));
-        String schemaSummary = String.format("已生成 %d 个标注组件：%s。%s",
-                components.size(), componentNames,
-                configResult.rationale() != null && configResult.rationale().length() > 20 ?
-                        configResult.rationale().substring(0, Math.min(80, configResult.rationale().length())) + "…" : "");
-        stages.add(new StageResult("schema_generator", "success", schemaDuration, schemaOutput, schemaSummary));
+        String schemaSummary = components.isEmpty()
+                ? "未能生成标注模板，请检查任务说明是否足够清晰"
+                : String.format("已生成 %d 个标注组件（%s），覆盖该任务的核心标注需求", components.size(), componentNames);
+        stages.add(new StageResult("schema_generator", components.isEmpty() ? "warning" : "success", schemaDuration, schemaOutput, schemaSummary));
 
         // Stage 5: rubric_generator
         stageStart = System.currentTimeMillis();
@@ -174,10 +163,10 @@ public class AgentPipelineService {
         agentMetrics.recordPipelineStage("rubric_generator", rubricDuration);
         agentMetrics.recordAgentChain("schema-generator", "rubric-generator");
 
-        String rubricSummary = String.format("已生成 %d 条质检规则，覆盖 %d 个评分维度（%s）。严重度分布：%s",
-                rules.size(), dimensions.size(), String.join("、", dimensions),
-                severityDist.entrySet().stream().map(e -> e.getKey() + "×" + e.getValue()).collect(Collectors.joining("、")));
-        stages.add(new StageResult("rubric_generator", "success", rubricDuration, rubricOutput, rubricSummary));
+        String rubricSummary = rules.isEmpty()
+                ? "未能生成质检规则，请确认任务说明中包含质量要求"
+                : String.format("已生成 %d 条质检规则，覆盖%s等 %d 个评分维度", rules.size(), String.join("、", dimensions.stream().limit(3).toList()), dimensions.size());
+        stages.add(new StageResult("rubric_generator", rules.isEmpty() ? "warning" : "success", rubricDuration, rubricOutput, rubricSummary));
 
         // Stage 6: critic
         stageStart = System.currentTimeMillis();
@@ -206,9 +195,8 @@ public class AgentPipelineService {
         agentMetrics.recordAgentChain("rubric-generator", "critic");
 
         String criticSummary = criticIssues.isEmpty()
-                ? String.format("综合评审通过，置信度 %.0f%%。任务配置完整，可以发布。", confidence * 100)
-                : String.format("发现 %d 个问题：%s。建议：%s", criticIssues.size(),
-                String.join("；", criticIssues), String.join("；", suggestions));
+                ? "任务配置完整，标注模板、质检规则和样例数据均已就绪，可以安全发布"
+                : String.format("发现 %d 个需要关注的问题：%s", criticIssues.size(), String.join("；", criticIssues));
         stages.add(new StageResult("critic", criticStatus, criticDuration, criticOutput, criticSummary));
 
         // Stage 7: task_package_writer
@@ -235,8 +223,8 @@ public class AgentPipelineService {
         agentMetrics.recordAgentChain("critic", "task-package-writer");
 
         String writerSummary = criticIssues.isEmpty()
-                ? String.format("任务包已组装完成：%d 个组件、%d 条规则、%d 个维度，可发布。", components.size(), rules.size(), dimensions.size())
-                : "任务包组装完成但存在未解决问题，建议修复后再发布。";
+                ? String.format("任务包组装完成，包含 %d 个标注组件和 %d 条质检规则，发布后标注员即可领取", components.size(), rules.size())
+                : "任务包已组装但存在待修复项，建议修复后再发布";
         stages.add(new StageResult("task_package_writer", criticIssues.isEmpty() ? "success" : "warning", writerDuration, writerOutput, writerSummary));
 
         long totalDuration = System.currentTimeMillis() - pipelineStart;
@@ -244,16 +232,8 @@ public class AgentPipelineService {
 
         boolean allPassed = stages.stream().allMatch(s -> "success".equals(s.status()));
 
-        PipelineLog pipelineLog = new PipelineLog(
-                promptLog.toString() + "总耗时 " + totalDuration + "ms",
-                totalTokens,
-                skillNames,
-                "deepseek-chat",
-                ragContext.length() > 200 ? ragContext.substring(0, 200) + "…" : ragContext
-        );
-
         log.info("Pipeline {} completed in {}ms, allPassed={}", pipelineId, totalDuration, allPassed);
-        return new PipelineResponse(pipelineId, stages, allPassed, taskPackage, pipelineLog);
+        return new PipelineResponse(pipelineId, stages, allPassed, taskPackage);
     }
 
     private List<Map<String, String>> loadSkills() {
@@ -302,5 +282,55 @@ public class AgentPipelineService {
             if (capturing) section.append(line).append("\n");
         }
         return section.toString().trim();
+    }
+
+    private String loadContracts() {
+        String[] contractFiles = {"schema-contract.md", "rubric-contract.md", "prompt-template-contract.md"};
+        StringBuilder sb = new StringBuilder();
+        for (String file : contractFiles) {
+            Path path = Path.of(contractsDir, file);
+            try {
+                if (Files.exists(path)) {
+                    String content = Files.readString(path);
+                    String body = content.replaceAll("(?s)^---.*?---\\s*", "").trim();
+                    if (body.length() > 800) body = body.substring(0, 800) + "…";
+                    sb.append("[").append(file.replace(".md", "")).append("]\n").append(body).append("\n\n");
+                }
+            } catch (IOException e) {
+                log.warn("Failed to read contract {}: {}", file, e.getMessage());
+            }
+        }
+        return sb.toString().trim();
+    }
+
+    public String buildFullRagContext(String skillRules) {
+        StringBuilder rag = new StringBuilder();
+        if (skillRules != null && !skillRules.isBlank()) {
+            rag.append("[平台标注技能规则]\n").append(skillRules).append("\n\n");
+        }
+        String contracts = loadContracts();
+        if (!contracts.isBlank()) {
+            rag.append("[平台契约约束]\n").append(contracts);
+        }
+        return rag.toString().trim();
+    }
+
+    public String buildCompactRagContext() {
+        return """
+                [数据约束]
+                - 每条数据必须包含 id 字段（唯一编号）
+                - content 字段承载待标注原始内容
+                - metadata 字段承载来源和时间
+                - 字段名使用英文 snake_case
+                - 字段值不允许为空字符串
+                
+                [Schema 约束]
+                - 组件 type 只允许: shortText, longText, singleChoice, multiChoice, tagSelect, richText, fileUpload, jsonEditor, llmInteraction, showItem
+                - dataPath 必须以 $. 开头
+                - 每个组件必须有 id, type, label, dataPath, required, props, validation
+                
+                [质检约束]
+                - severity 只允许: low, medium, high, critical
+                - 评分维度至少包含: 相关性, 准确性, 格式合规, 安全性""";
     }
 }
