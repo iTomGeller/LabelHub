@@ -5,7 +5,7 @@ const navItems = [
   { key: "settings", label: "系统设置", href: "/?view=settings" }
 ] as const;
 
-export type ViewKey = (typeof navItems)[number]["key"] | "task";
+export type ViewKey = (typeof navItems)[number]["key"] | "task" | "detail";
 
 export function AppShell({
   children,
@@ -28,7 +28,7 @@ export function AppShell({
       <aside className="fixed bottom-0 left-0 top-14 w-52 bg-primary px-3 py-6 text-white">
         <nav className="space-y-1" aria-label="主导航">
           {navItems.map((item) => {
-            const isActive = item.key === activeView || (item.key === "list" && activeView === "task");
+            const isActive = item.key === activeView || (item.key === "list" && (activeView === "task" || activeView === "detail"));
             return (
               <a
                 key={item.key}

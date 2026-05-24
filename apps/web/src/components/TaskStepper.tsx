@@ -200,6 +200,7 @@ export function TaskStepper({ taskId }: { taskId?: string }) {
   const [error, setError] = useState<string | null>(null);
   const [published, setPublished] = useState(false);
   const [dagPassed, setDagPassed] = useState(false);
+  const [dagReport, setDagReport] = useState<{ pipelineId: string; allPassed: boolean; totalMs: number; stages: { stage: string; status: string; durationMs: number; summary: string }[] } | null>(null);
   const currentIdx = STEPS.findIndex((s) => s.key === step);
 
   function goNext() {
@@ -272,7 +273,9 @@ export function TaskStepper({ taskId }: { taskId?: string }) {
       assignmentPolicy: config.assignmentPolicy,
       agentPolicy: config.agentPolicy,
       sampleItemCount: config.sampleData.length,
+      sampleData: config.sampleData,
       publishedAt: new Date().toISOString(),
+      dagReport: dagReport || undefined,
     };
     localStorage.setItem(key, JSON.stringify(taskPackage));
     const tasks = JSON.parse(localStorage.getItem("labelhub_published_tasks") || "[]");
@@ -339,7 +342,7 @@ export function TaskStepper({ taskId }: { taskId?: string }) {
       {step === "upload" && <StepUpload config={config} setConfig={setConfig} onAiGenerate={handleAiGenerate} loading={loading} />}
       {step === "template" && <StepTemplate config={config} setConfig={setConfig} />}
       {step === "rules" && <StepRules config={config} setConfig={setConfig} />}
-      {step === "publish" && <StepPublish config={config} allPassed={allPassed} checks={checks} onPublish={handlePublish} onDagResult={setDagPassed} />}
+      {step === "publish" && <StepPublish config={config} allPassed={allPassed} checks={checks} onDagResult={(passed, report) => { setDagPassed(passed); if (report) setDagReport(report); }} />}
 
       <div className="flex items-center justify-between">
         <button onClick={goPrev} disabled={currentIdx === 0} className={`rounded-xl border border-primary/20 px-5 py-2.5 text-sm font-bold ${currentIdx === 0 ? "cursor-not-allowed text-ink/30" : "text-primary hover:border-accent"}`}>上一步</button>
@@ -357,14 +360,14 @@ export function TaskStepper({ taskId }: { taskId?: string }) {
 
 function getPublishChecks(config: TaskConfig) {
   return [
-    { label: "任务名称已填写", ok: config.taskName.trim().length > 0 },
-    { label: "任务说明已填写", ok: config.instruction.trim().length > 0 },
-    { label: "样例数据已导入", ok: config.sampleData.length > 0 },
-    { label: "标注模板已配置", ok: config.schemaComponents.length > 0 },
-    { label: "质检规则已配置", ok: config.rubricRules.length > 0 },
-    { label: "评分维度 ≥ 4", ok: config.rubricDimensions.length >= 4 },
-    { label: "分配策略已设置", ok: config.assignmentPolicy.mode === "auto_claim" },
-    { label: "AI 预审已启用", ok: config.agentPolicy.precheckEnabled },
+    { label: "任务名称已填写", ok: config.taskName.trim().length > 0, hint: "前往步骤 1 填写", step: "upload" as StepKey },
+    { label: "任务说明已填写", ok: config.instruction.trim().length > 0, hint: "前往步骤 1 填写", step: "upload" as StepKey },
+    { label: "样例数据已导入", ok: config.sampleData.length > 0, hint: "前往步骤 1 导入数据", step: "upload" as StepKey },
+    { label: "标注模板已配置", ok: config.schemaComponents.length > 0, hint: "前往步骤 2 添加组件", step: "template" as StepKey },
+    { label: "质检规则已配置", ok: config.rubricRules.length > 0, hint: "前往步骤 3 添加规则", step: "rules" as StepKey },
+    { label: "评分维度已配置", ok: config.rubricDimensions.length >= 4, hint: "前往步骤 3 添加维度", step: "rules" as StepKey },
+    { label: "分配策略已设置", ok: config.assignmentPolicy.mode === "auto_claim", hint: "自动设置" },
+    { label: "AI 预审已启用", ok: config.agentPolicy.precheckEnabled, hint: "自动设置" },
   ];
 }
 
@@ -1002,179 +1005,155 @@ function RuleCard({ rule, idx, components, updateRule, removeRule }: { rule: Rub
 
 /* ─── Step 4: Publish ─── */
 
-function DagNode({ label, status, durationMs, icon, active, onClick }: { label: string; status: string; durationMs: number; icon: string; active: boolean; onClick: () => void }) {
-  const border = status === "success" ? "border-success/60" : status === "warning" ? "border-warning/60" : "border-danger/60";
-  const bg = status === "success" ? "bg-success/5" : status === "warning" ? "bg-warning/5" : "bg-danger/5";
-  return (
-    <button onClick={onClick} className={`relative flex items-center gap-2.5 rounded-xl border-2 px-3 py-2 transition-all hover:shadow-md ${border} ${bg} ${active ? "ring-2 ring-accent shadow-lg scale-[1.02]" : ""}`}>
-      <span className={`flex h-7 w-7 items-center justify-center rounded-lg text-[10px] font-black ${status === "success" ? "bg-success/15 text-success" : "bg-warning/15 text-warning"}`}>{icon}</span>
-      <div className="text-left">
-        <p className="text-xs font-bold text-primary leading-tight">{label}</p>
-        <p className="text-[10px] text-ink/40">{durationMs}ms</p>
-      </div>
-      <span className={`ml-auto h-2 w-2 rounded-full ${status === "success" ? "bg-success" : "bg-warning"}`} />
-    </button>
-  );
+function getConfigHash(config: TaskConfig): string {
+  return `${config.taskName}|${config.instruction.slice(0, 50)}|${config.sampleData.length}|${config.schemaComponents.length}|${config.rubricRules.length}|${config.rubricDimensions.length}`;
 }
 
-function StepPublish({ config, allPassed, checks, onPublish, onDagResult }: { config: TaskConfig; allPassed: boolean; checks: { label: string; ok: boolean }[]; onPublish: () => void; onDagResult: (passed: boolean) => void }) {
+const AUDIT_LABELS: Record<string, string> = {
+  task_context_builder: "任务描述完整性",
+  skill_loader: "标注技能匹配",
+  dataset_sampler: "样例数据质量",
+  schema_generator: "标注模板合理性",
+  rubric_generator: "质检规则覆盖度",
+  critic: "综合质量评审",
+  task_package_writer: "发布就绪度",
+};
+
+type DagResultType = { pipelineId: string; stages: { stage: string; status: string; durationMs: number; output: Record<string, unknown>; summary: string }[]; allPassed: boolean; pipelineLog?: { skillsLoaded: string[]; modelUsed: string; promptSnapshot: string } };
+
+function StepPublish({ config, allPassed, checks, onDagResult }: { config: TaskConfig; allPassed: boolean; checks: { label: string; ok: boolean; step?: StepKey; hint?: string }[]; onDagResult: (passed: boolean, report?: { pipelineId: string; allPassed: boolean; totalMs: number; stages: { stage: string; status: string; durationMs: number; summary: string }[] }) => void }) {
   const [dagLoading, setDagLoading] = useState(false);
-  const [dagResult, setDagResult] = useState<{ pipelineId: string; stages: { stage: string; status: string; durationMs: number; output: Record<string, unknown>; summary: string }[]; allPassed: boolean; pipelineLog?: { skillsLoaded: string[]; modelUsed: string; promptSnapshot: string } } | null>(null);
-  const [selectedNode, setSelectedNode] = useState<string | null>(null);
-  const [dagTriggered, setDagTriggered] = useState(false);
-  const [showRaw, setShowRaw] = useState(false);
-  const [pkgTab, setPkgTab] = useState<"overview"|"schema"|"rubric"|"json">("overview");
+  const [dagResult, setDagResult] = useState<DagResultType | null>(null);
+  const [dagHash, setDagHash] = useState<string>("");
+  const [showTechLog, setShowTechLog] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  const STAGES: { id: string; label: string; icon: string }[] = [
-    { id: "task_context_builder", label: "上下文构建", icon: "CTX" },
-    { id: "skill_loader", label: "技能加载", icon: "SKL" },
-    { id: "dataset_sampler", label: "数据采样", icon: "DAT" },
-    { id: "schema_generator", label: "Schema 生成", icon: "SCH" },
-    { id: "rubric_generator", label: "Rubric 生成", icon: "RUB" },
-    { id: "critic", label: "AI 评审", icon: "CRT" },
-    { id: "task_package_writer", label: "包组装输出", icon: "PKG" },
-  ];
+  const currentHash = getConfigHash(config);
 
   async function runDagCheck() {
-    setDagLoading(true); setDagTriggered(true);
+    setDagLoading(true);
     try {
       const res = await fetch("/agent-api/agents/pipeline", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ taskName: config.taskName, instruction: config.instruction, sampleData: config.sampleData.slice(0, 5) }) });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      setDagResult(data); onDagResult(data.allPassed === true);
-    } catch (e) { alert("Pipeline 执行失败: " + (e instanceof Error ? e.message : "")); onDagResult(false); }
+      setDagResult(data);
+      setDagHash(currentHash);
+      const totalMs = data.stages?.reduce((s: number, x: { durationMs: number }) => s + x.durationMs, 0) || 0;
+      onDagResult(data.allPassed === true, { pipelineId: data.pipelineId, allPassed: data.allPassed, totalMs, stages: data.stages.map((s: { stage: string; status: string; durationMs: number; summary: string }) => ({ stage: s.stage, status: s.status, durationMs: s.durationMs, summary: s.summary })) });
+    } catch (e) { alert("审核执行失败: " + (e instanceof Error ? e.message : "")); onDagResult(false); }
     finally { setDagLoading(false); }
   }
 
-  useEffect(() => { if (!dagTriggered && config.taskName.trim()) runDagCheck(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!dagResult && !dagLoading && config.taskName.trim()) {
+      runDagCheck();
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const isCacheValid = dagHash === currentHash && dagResult !== null;
   const canPublish = allPassed && dagResult?.allPassed === true;
   const totalMs = dagResult?.stages.reduce((s, x) => s + x.durationMs, 0) || 0;
-  const selectedStage = dagResult?.stages.find(s => s.stage === selectedNode);
-
-  const taskPackage = {
-    taskId: config.taskId, title: config.taskName, instruction: config.instruction, version: "1.0.0", status: canPublish ? "ready" : "draft",
-    schema: { components: config.schemaComponents, frozen: allPassed },
-    rubric: { dimensions: config.rubricDimensions, rules: config.rubricRules },
-    assignmentPolicy: config.assignmentPolicy, agentPolicy: config.agentPolicy,
-    sampleData: config.sampleData, sampleItemCount: config.sampleData.length, createdAt: new Date().toISOString(),
-  };
-
-  function exportPkg(fmt: string) {
-    let content: string, filename: string, mime: string;
-    if (fmt === "json") { content = JSON.stringify(taskPackage, null, 2); filename = `task-package-${config.taskId}.json`; mime = "application/json"; }
-    else {
-      const comps = config.schemaComponents.map((c, i) => `${i + 1}. **${c.label}** (\`${c.type}\`) ${c.required ? "[必填]" : ""}`).join("\n");
-      const rules = config.rubricRules.map((r, i) => `${i + 1}. \`${r.severity}\` ${r.description}`).join("\n");
-      content = `# ${config.taskName}\n\n> Task ID: \`${config.taskId}\`  \n> 版本: 1.0.0 | 状态: ${canPublish ? "就绪" : "草稿"}\n\n## 任务说明\n\n${config.instruction}\n\n## 标注组件 (${config.schemaComponents.length})\n\n${comps}\n\n## 质检规则 (${config.rubricRules.length})\n\n${rules}\n\n## 评分维度\n\n${config.rubricDimensions.join(" / ")}\n\n## 分配策略\n\n- 模式: ${config.assignmentPolicy.mode === "auto_claim" ? "自动领取" : "手动指派"}\n- 截止: ${config.assignmentPolicy.deadlineHours}h\n\n## 样例数据\n\n共 ${config.sampleData.length} 条\n`;
-      filename = `task-package-${config.taskId}.md`; mime = "text/markdown";
-    }
-    const blob = new Blob([content], { type: mime }); const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = filename; a.click();
-  }
+  const passedCount = dagResult?.stages.filter(s => s.status === "success").length || 0;
+  const failedChecks = checks.filter(c => !c.ok);
 
   return (
     <div className="space-y-5">
-      {/* DAG Pipeline Visualization */}
-      <div className="rounded-2xl border border-accent/20 bg-white overflow-hidden">
-        <div className="flex items-center justify-between border-b border-primary/5 px-6 py-4">
-          <div>
-            <h3 className="text-lg font-bold text-primary">Multi-Agent DAG Pipeline</h3>
-            <p className="text-xs text-ink/50">7-Stage 有向无环图 — 点击节点查看 Agent 执行详情</p>
+      {/* Actionable Validation Checklist */}
+      <div className="rounded-2xl border border-primary/10 bg-white p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-bold text-primary">发布前检查</h3>
+          {allPassed ? (
+            <span className="rounded-full bg-success/10 px-3 py-1.5 text-xs font-bold text-success">全部通过</span>
+          ) : (
+            <span className="rounded-full bg-warning/10 px-3 py-1.5 text-xs font-bold text-warning">还需完成 {failedChecks.length} 项</span>
+          )}
+        </div>
+
+        {failedChecks.length > 0 && (
+          <div className="mb-4 space-y-2">
+            <p className="text-xs font-bold text-ink/40">需要修复:</p>
+            {failedChecks.map(c => (
+              <div key={c.label} className="flex items-center gap-3 rounded-xl bg-warning/5 border border-warning/20 px-4 py-2.5">
+                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-warning/15 text-warning text-xs font-bold">!</span>
+                <span className="text-sm text-primary flex-1">{c.label}</span>
+                {c.hint && <span className="text-xs text-ink/40">{c.hint}</span>}
+              </div>
+            ))}
           </div>
-          <div className="flex items-center gap-3">
-            {dagResult && <span className="text-xs text-ink/40 font-mono">{(totalMs / 1000).toFixed(2)}s</span>}
-            <button onClick={runDagCheck} disabled={dagLoading} className={`rounded-xl px-4 py-2 text-sm font-bold text-white transition ${dagLoading ? "bg-accent/50 cursor-wait animate-pulse" : "bg-accent hover:bg-accent/90"}`}>
-              {dagLoading ? "执行中…" : dagResult ? "重新执行" : "执行 Pipeline"}
+        )}
+
+        <div className="grid gap-2 md:grid-cols-2">
+          {checks.filter(c => c.ok).map(c => (
+            <div key={c.label} className="flex items-center gap-2 rounded-lg bg-success/5 px-3 py-2">
+              <span className="flex h-4 w-4 items-center justify-center rounded-full bg-success/20 text-success text-[10px]">{"\u2713"}</span>
+              <span className="text-sm text-primary">{c.label}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* AI Audit Report (Humanized DAG) */}
+      <div className="rounded-2xl border border-primary/10 bg-white p-6">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h3 className="text-lg font-bold text-primary">AI 质量审核</h3>
+            <p className="text-xs text-ink/50">AI 从 7 个维度评估任务配置的合理性和完整性</p>
+          </div>
+          <div className="flex items-center gap-2">
+            {isCacheValid && <span className="text-[10px] text-ink/30 bg-surface rounded px-2 py-0.5">已缓存</span>}
+            <button onClick={runDagCheck} disabled={dagLoading} className={`rounded-xl px-4 py-2 text-sm font-bold transition ${dagLoading ? "bg-accent/50 text-white cursor-wait" : isCacheValid ? "border border-accent/30 text-accent hover:bg-accent/5" : "bg-accent text-white hover:bg-accent/90"}`}>
+              {dagLoading ? "审核中…" : isCacheValid ? "重新审核" : "开始审核"}
             </button>
           </div>
         </div>
 
-        {dagLoading && !dagResult && (
-          <div className="py-16 flex flex-col items-center gap-4">
-            <div className="relative h-10 w-10">
-              <div className="absolute inset-0 animate-ping rounded-full bg-accent/20" />
-              <div className="relative h-10 w-10 animate-spin rounded-full border-[3px] border-accent/30 border-t-accent" />
-            </div>
-            <p className="text-sm text-ink/50">Multi-Agent Pipeline 执行中，依次调度 7 个 Agent…</p>
+        {dagLoading && (
+          <div className="py-8 flex flex-col items-center gap-3">
+            <div className="h-6 w-6 animate-spin rounded-full border-2 border-accent/30 border-t-accent" />
+            <p className="text-sm text-ink/50">AI 正在从多个维度评估您的任务配置…</p>
           </div>
         )}
 
-        {dagResult && (
-          <div className="flex min-h-[420px]">
-            {/* DAG Graph Column */}
-            <div className="w-[220px] flex-shrink-0 border-r border-primary/5 bg-surface/20 p-4 overflow-y-auto">
-              <div className="flex flex-col items-center gap-0">
-                {STAGES.map((st, idx) => {
-                  const result = dagResult.stages.find(s => s.stage === st.id);
-                  const status = result?.status || "pending";
-                  const dur = result?.durationMs || 0;
-                  return (
-                    <div key={st.id} className="flex flex-col items-center w-full">
-                      {idx > 0 && (
-                        <div className="flex flex-col items-center py-0.5">
-                          <svg width="2" height="16" className="text-ink/15"><line x1="1" y1="0" x2="1" y2="16" stroke="currentColor" strokeWidth="2" /></svg>
-                          <svg width="8" height="6" className="text-ink/20 -mt-px"><polygon points="4,6 0,0 8,0" fill="currentColor" /></svg>
-                        </div>
-                      )}
-                      <DagNode label={st.label} icon={st.icon} status={status} durationMs={dur} active={selectedNode === st.id} onClick={() => setSelectedNode(selectedNode === st.id ? null : st.id)} />
-                    </div>
-                  );
-                })}
-              </div>
-              {/* Pipeline Status Bar */}
-              <div className="mt-4 pt-3 border-t border-primary/5">
-                <div className="flex items-center gap-2 mb-1.5">
-                  <span className={`h-2.5 w-2.5 rounded-full ${dagResult.allPassed ? "bg-success" : "bg-warning animate-pulse"}`} />
-                  <span className="text-[11px] font-bold text-primary">{dagResult.allPassed ? "ALL PASSED" : "HAS WARNINGS"}</span>
-                </div>
-                <div className="flex gap-0.5">
-                  {dagResult.stages.map(s => <div key={s.stage} className={`h-1 flex-1 rounded-full ${s.status === "success" ? "bg-success" : "bg-warning"}`} />)}
-                </div>
+        {dagResult && !dagLoading && (
+          <div className="space-y-4">
+            {/* Score Summary */}
+            <div className="rounded-xl bg-surface/40 p-4 flex items-center gap-4">
+              <span className={`flex h-12 w-12 items-center justify-center rounded-full text-lg font-bold ${dagResult.allPassed ? "bg-success/15 text-success" : "bg-warning/15 text-warning"}`}>
+                {passedCount}/{dagResult.stages.length}
+              </span>
+              <div>
+                <p className="text-sm font-bold text-primary">{dagResult.allPassed ? "审核通过，可以安全发布" : "部分维度需要关注"}</p>
+                <p className="text-xs text-ink/40">共 {dagResult.stages.length} 项检查，{passedCount} 项合格，耗时 {(totalMs / 1000).toFixed(1)} 秒</p>
               </div>
             </div>
 
-            {/* Detail Panel */}
-            <div className="flex-1 p-5 overflow-y-auto">
-              {selectedStage ? (
-                <div className="space-y-4">
+            {/* Human-readable checklist */}
+            <div className="space-y-2">
+              {dagResult.stages.map((s, idx) => (
+                <div key={s.stage} className={`rounded-xl px-4 py-3 ${s.status === "success" ? "bg-success/5" : "bg-warning/5 border border-warning/15"}`}>
                   <div className="flex items-center gap-3">
-                    <span className={`flex h-9 w-9 items-center justify-center rounded-xl text-xs font-black ${selectedStage.status === "success" ? "bg-success/10 text-success" : "bg-warning/10 text-warning"}`}>
-                      {STAGES.find(s => s.id === selectedStage.stage)?.icon}
+                    <span className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold ${s.status === "success" ? "bg-success/15 text-success" : "bg-warning/15 text-warning"}`}>
+                      {s.status === "success" ? "\u2713" : "!"}
                     </span>
-                    <div>
-                      <h4 className="font-bold text-primary">{STAGES.find(s => s.id === selectedStage.stage)?.label}</h4>
-                      <p className="text-xs text-ink/40">Stage: {selectedStage.stage} | {selectedStage.durationMs}ms | {selectedStage.status.toUpperCase()}</p>
-                    </div>
+                    <span className="text-sm font-bold text-primary">{idx + 1}. {AUDIT_LABELS[s.stage] || s.stage}</span>
+                    <span className={`ml-auto text-xs font-bold ${s.status === "success" ? "text-success" : "text-warning"}`}>{s.status === "success" ? "通过" : "警告"}</span>
                   </div>
-                  <div className="rounded-xl bg-surface/40 p-4">
-                    <p className="text-xs font-bold text-ink/40 mb-1.5">执行摘要</p>
-                    <p className="text-sm text-ink/70 leading-relaxed">{selectedStage.summary}</p>
-                  </div>
-                  {selectedStage.output && (
-                    <div>
-                      <button onClick={() => setShowRaw(!showRaw)} className="flex items-center gap-1.5 text-xs text-ink/40 hover:text-accent mb-2">
-                        <svg className={`h-3 w-3 transition ${showRaw ? "rotate-90" : ""}`} fill="currentColor" viewBox="0 0 20 20"><path d="M6 4l8 6-8 6V4z" /></svg>
-                        {showRaw ? "收起原始输出" : "展开原始输出 (JSON)"}
-                      </button>
-                      {showRaw && <pre className="max-h-[220px] overflow-auto rounded-xl border border-primary/5 bg-white p-3 text-[11px] leading-relaxed text-ink/50 font-mono">{JSON.stringify(selectedStage.output, null, 2)}</pre>}
-                    </div>
-                  )}
+                  <p className="mt-1.5 ml-9 text-xs text-ink/60 leading-relaxed">{s.summary}</p>
                 </div>
-              ) : (
-                <div className="h-full flex flex-col items-center justify-center text-center py-12">
-                  <div className="rounded-2xl bg-surface/30 p-8 max-w-sm">
-                    <svg className="mx-auto h-10 w-10 text-ink/15 mb-3" fill="none" stroke="currentColor" strokeWidth={1.2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2" /></svg>
-                    <p className="text-sm text-ink/40 mb-4">点击左侧 DAG 节点查看该 Agent 的详细执行结果</p>
-                    {dagResult.pipelineLog && (
-                      <div className="text-left rounded-lg bg-white border border-primary/5 p-3 space-y-1.5">
-                        <p className="text-[11px] text-ink/50"><span className="font-bold">Pipeline ID:</span> {dagResult.pipelineId.slice(0, 8)}…</p>
-                        <p className="text-[11px] text-ink/50"><span className="font-bold">Model:</span> {dagResult.pipelineLog.modelUsed}</p>
-                        <p className="text-[11px] text-ink/50"><span className="font-bold">Skills Loaded:</span> {dagResult.pipelineLog.skillsLoaded?.length || 0}</p>
-                        <p className="text-[11px] text-ink/50"><span className="font-bold">Total Duration:</span> {(totalMs / 1000).toFixed(2)}s</p>
-                      </div>
-                    )}
-                  </div>
+              ))}
+            </div>
+
+            {/* Tech Log (collapsed by default) */}
+            <div className="pt-2 border-t border-primary/5">
+              <button onClick={() => setShowTechLog(!showTechLog)} className="text-xs text-ink/30 hover:text-ink/50 transition">
+                {showTechLog ? "收起技术日志" : "查看技术日志 (开发者)"}
+              </button>
+              {showTechLog && dagResult.pipelineLog && (
+                <div className="mt-2 rounded-lg bg-surface/30 p-3 text-[11px] text-ink/40 space-y-1">
+                  <p>Pipeline ID: {dagResult.pipelineId}</p>
+                  <p>Model: {dagResult.pipelineLog.modelUsed}</p>
+                  <p>Skills: {dagResult.pipelineLog.skillsLoaded?.join(", ")}</p>
+                  <p>Duration: {totalMs}ms</p>
                 </div>
               )}
             </div>
@@ -1182,82 +1161,29 @@ function StepPublish({ config, allPassed, checks, onPublish, onDagResult }: { co
         )}
       </div>
 
-      {/* Task Package Viewer */}
-      <div className="rounded-2xl border border-primary/10 bg-white overflow-hidden">
-        <div className="flex items-center justify-between border-b border-primary/5 px-6 py-4">
-          <div>
-            <h3 className="text-lg font-bold text-primary">任务包</h3>
-            <p className="text-xs text-ink/50">发布后 B/C 模块通过 API 获取的完整任务数据</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <button onClick={() => exportPkg("json")} className="rounded-lg border border-accent/30 px-3 py-1.5 text-xs font-bold text-accent hover:bg-accent/5 transition">导出 JSON</button>
-            <button onClick={() => exportPkg("md")} className="rounded-lg border border-primary/15 px-3 py-1.5 text-xs font-bold text-primary hover:bg-surface/50 transition">导出 MD</button>
-            <button onClick={() => { navigator.clipboard.writeText(JSON.stringify(taskPackage, null, 2)); setCopied(true); setTimeout(() => setCopied(false), 1500); }} className="rounded-lg border border-primary/15 px-3 py-1.5 text-xs font-bold text-primary hover:bg-surface/50 transition">{copied ? "已复制" : "复制"}</button>
-          </div>
-        </div>
-        <div className="flex border-b border-primary/5">
-          {([["overview", "概览"], ["schema", "标注模板"], ["rubric", "质检规则"], ["json", "JSON"]] as const).map(([k, v]) => (
-            <button key={k} onClick={() => setPkgTab(k as typeof pkgTab)} className={`px-5 py-2.5 text-xs font-bold transition ${pkgTab === k ? "text-accent border-b-2 border-accent" : "text-ink/40 hover:text-primary"}`}>{v}</button>
-          ))}
-        </div>
-        <div className="p-5 max-h-[340px] overflow-y-auto">
-          {pkgTab === "overview" && (
-            <div className="grid gap-3 md:grid-cols-2">
-              <SummaryItem label="任务名称" value={config.taskName || "—"} />
-              <SummaryItem label="状态" value={canPublish ? "就绪待发布" : "配置中"} />
-              <SummaryItem label="标注组件" value={`${config.schemaComponents.length} 个`} />
-              <SummaryItem label="质检规则" value={`${config.rubricRules.length} 条`} />
-              <SummaryItem label="样例数据" value={`${config.sampleData.length} 条`} />
-              <SummaryItem label="分配模式" value={config.assignmentPolicy.mode === "auto_claim" ? "自动领取" : "手动指派"} />
-              <SummaryItem label="AI 预审" value={config.agentPolicy.precheckEnabled ? `阈值 ${Math.round(config.agentPolicy.confidenceThreshold * 100)}%` : "关闭"} />
-              <SummaryItem label="截止时间" value={`${config.assignmentPolicy.deadlineHours} 小时`} />
-            </div>
-          )}
-          {pkgTab === "schema" && (
-            <div className="space-y-2">{config.schemaComponents.length === 0 ? <p className="text-sm text-ink/40">暂无组件</p> : config.schemaComponents.map((c, i) => (
-              <div key={i} className="flex items-center gap-3 rounded-lg bg-surface/40 px-4 py-2.5">
-                <span className="rounded bg-accent/10 px-2 py-0.5 text-[10px] font-black text-accent uppercase">{c.type}</span>
-                <span className="text-sm font-medium text-primary flex-1">{c.label}</span>
-                {c.required && <span className="rounded bg-danger/10 px-1.5 py-0.5 text-[10px] font-bold text-danger">必填</span>}
-              </div>
-            ))}</div>
-          )}
-          {pkgTab === "rubric" && (
-            <div className="space-y-2">
-              {config.rubricRules.length === 0 ? <p className="text-sm text-ink/40">暂无规则</p> : config.rubricRules.map((r, i) => (
-                <div key={i} className="flex items-center gap-2 rounded-lg border border-primary/5 px-4 py-2.5">
-                  <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold uppercase ${r.severity === "critical" ? "bg-danger/10 text-danger" : r.severity === "high" ? "bg-warning/10 text-warning" : "bg-primary/5 text-primary"}`}>{r.severity}</span>
-                  <span className="text-sm text-primary">{r.description}</span>
-                </div>
-              ))}
-              {config.rubricDimensions.length > 0 && <div className="mt-3 pt-3 border-t border-primary/5"><p className="text-xs font-bold text-ink/40 mb-2">评分维度</p><div className="flex flex-wrap gap-2">{config.rubricDimensions.map((d, i) => <span key={i} className="rounded-full bg-accent/10 px-2.5 py-1 text-xs font-bold text-accent">{d}</span>)}</div></div>}
-            </div>
-          )}
-          {pkgTab === "json" && <pre className="text-[11px] leading-5 text-ink/60 font-mono whitespace-pre-wrap">{JSON.stringify(taskPackage, null, 2)}</pre>}
-        </div>
-      </div>
-
-      {/* Basic Checks */}
+      {/* Task Package Quick Preview */}
       <div className="rounded-2xl border border-primary/10 bg-white p-6">
-        <div className="flex items-center justify-between">
-          <h3 className="font-bold text-primary">基础检查</h3>
-          <span className={`rounded-full px-3 py-1 text-xs font-bold ${allPassed ? "bg-success/10 text-success" : "bg-warning/10 text-warning"}`}>{checks.filter(c => c.ok).length}/{checks.length}</span>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-bold text-primary">任务包预览</h3>
+          <div className="flex items-center gap-2">
+            <button onClick={() => { const pkg = JSON.stringify({ taskId: config.taskId, title: config.taskName, instruction: config.instruction, schema: { components: config.schemaComponents }, rubric: { dimensions: config.rubricDimensions, rules: config.rubricRules }, assignmentPolicy: config.assignmentPolicy, agentPolicy: config.agentPolicy, sampleItemCount: config.sampleData.length }, null, 2); const b = new Blob([pkg], { type: "application/json" }); const a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = `task-${config.taskId}.json`; a.click(); }} className="rounded-lg border border-accent/30 px-3 py-1.5 text-xs font-bold text-accent hover:bg-accent/5">导出文件</button>
+            <button onClick={() => { navigator.clipboard.writeText(JSON.stringify({ taskId: config.taskId, title: config.taskName, instruction: config.instruction, schema: { components: config.schemaComponents }, rubric: { dimensions: config.rubricDimensions, rules: config.rubricRules } }, null, 2)); setCopied(true); setTimeout(() => setCopied(false), 1500); }} className="rounded-lg border border-primary/15 px-3 py-1.5 text-xs font-bold text-primary hover:bg-surface/50">{copied ? "已复制" : "复制"}</button>
+          </div>
         </div>
-        <div className="mt-4 grid gap-2 md:grid-cols-2">
-          {checks.map((c) => (
-            <div key={c.label} className="flex items-center gap-2 rounded-lg bg-surface/60 px-3 py-2">
-              <span className={`h-2 w-2 rounded-full ${c.ok ? "bg-success" : "bg-danger"}`} />
-              <span className={`text-sm ${c.ok ? "text-primary" : "text-danger font-bold"}`}>{c.label}</span>
-            </div>
-          ))}
+        <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
+          <SummaryItem label="标注组件" value={`${config.schemaComponents.length} 个`} />
+          <SummaryItem label="质检规则" value={`${config.rubricRules.length} 条`} />
+          <SummaryItem label="样例数据" value={`${config.sampleData.length} 条`} />
+          <SummaryItem label="分配模式" value={config.assignmentPolicy.mode === "auto_claim" ? "自动领取" : "手动指派"} />
         </div>
-        {!allPassed && <p className="mt-3 text-xs text-danger">请回到前面的步骤补全未通过项后再发布</p>}
+        <p className="mt-3 text-xs text-ink/40">发布后，B/C 模块通过 API 获取完整任务包进行标注和审核</p>
       </div>
 
+      {/* Publish Gate Warning */}
       {!canPublish && dagResult && !dagResult.allPassed && (
         <div className="rounded-2xl border border-warning/30 bg-warning/5 p-4">
-          <p className="text-sm font-bold text-warning">AI Pipeline 审核未通过</p>
-          <p className="mt-1 text-xs text-ink/60">请根据上方 Agent 建议修改配置后重新执行 Pipeline。</p>
+          <p className="text-sm font-bold text-warning">AI 审核未完全通过</p>
+          <p className="mt-1 text-xs text-ink/60">建议根据上方审核意见优化配置后重新审核，或确认无需修改后强制发布。</p>
         </div>
       )}
     </div>

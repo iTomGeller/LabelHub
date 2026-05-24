@@ -1,10 +1,11 @@
 import { AppShell, type ViewKey } from "@/components/AppShell";
 import { TaskList } from "@/components/TaskList";
 import { TaskStepper } from "@/components/TaskStepper";
+import { TaskDetail } from "@/components/TaskDetail";
 import { SettingsView } from "@/components/SettingsView";
 import { AiDrawer } from "@/components/AiDrawer";
 
-const views: ViewKey[] = ["list", "task", "settings"];
+const views: ViewKey[] = ["list", "task", "detail", "settings"];
 
 export default function Home({ searchParams }: { searchParams?: { view?: string; taskId?: string } }) {
   const activeView = parseView(searchParams?.view);
@@ -28,6 +29,8 @@ function renderView(activeView: ViewKey, taskId?: string) {
       return <TaskList />;
     case "task":
       return <TaskStepper taskId={taskId} />;
+    case "detail":
+      return <TaskDetail taskId={taskId} />;
     case "settings":
       return <SettingsView />;
   }
