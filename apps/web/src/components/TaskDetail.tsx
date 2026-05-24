@@ -94,6 +94,7 @@ export function TaskDetail({ taskId }: { taskId?: string }) {
           <div className="flex items-center gap-2">
             <button onClick={() => exportPkg("json")} className="rounded-lg border border-accent/30 px-3 py-1.5 text-xs font-bold text-accent hover:bg-accent/5">导出 JSON</button>
             <button onClick={() => exportPkg("md")} className="rounded-lg border border-primary/15 px-3 py-1.5 text-xs font-bold text-primary hover:bg-surface/50">导出 MD</button>
+            <button onClick={() => { if (!pkg?.sampleData?.length) return; const headers = Object.keys(pkg.sampleData[0]); const rows = pkg.sampleData.map(row => headers.map(h => { const v = row[h]; const s = typeof v === "object" ? JSON.stringify(v) : String(v ?? ""); return `"${s.replace(/"/g, '""')}"`; }).join(",")); const csv = [headers.join(","), ...rows].join("\n"); const b = new Blob([csv], { type: "text/csv" }); const a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = `task-${taskId}-data.csv`; a.click(); }} className="rounded-lg border border-primary/15 px-3 py-1.5 text-xs font-bold text-primary hover:bg-surface/50">导出 CSV</button>
             <button onClick={() => { navigator.clipboard.writeText(JSON.stringify(pkg, null, 2)); setCopied(true); setTimeout(() => setCopied(false), 1500); }} className="rounded-lg border border-primary/15 px-3 py-1.5 text-xs font-bold text-primary hover:bg-surface/50">{copied ? "已复制" : "复制"}</button>
           </div>
         </div>
