@@ -1,22 +1,13 @@
 "use client";
 
 import { useState } from "react";
-
-interface TraceNode {
-  id: string;
-  type: string;
-  title: string;
-  status: string;
-  durationMs: number;
-  inputPreview?: unknown;
-  outputPreview?: unknown;
-  prompt?: Record<string, unknown>;
-  rag?: Record<string, unknown>;
-  skill?: Record<string, unknown>;
-  mcp?: Record<string, unknown>;
-  sandbox?: Record<string, unknown>;
-  children?: string[];
-}
+import {
+  groupTraceNodes,
+  groupHasRisk,
+  groupMatchesFilter,
+  type AgentExecutionGroup,
+  type TraceNode,
+} from "@/lib/traceExecution";
 
 interface Props {
   nodes: TraceNode[];
@@ -25,189 +16,260 @@ interface Props {
   traceCompleteness?: boolean;
 }
 
-const TYPE_COLORS: Record<string, string> = {
-  agent: "border-purple-200 bg-purple-50 text-purple-800",
-  prompt: "border-blue-200 bg-blue-50 text-blue-800",
-  rag: "border-emerald-200 bg-emerald-50 text-emerald-800",
-  skill: "border-orange-200 bg-orange-50 text-orange-800",
-  mcp: "border-cyan-200 bg-cyan-50 text-cyan-800",
-  tool: "border-amber-200 bg-amber-50 text-amber-800",
-  sandbox: "border-rose-200 bg-rose-50 text-rose-800",
-  handoff: "border-indigo-200 bg-indigo-50 text-indigo-800",
-};
+const FILTER_OPTIONS = [
+  { key: "all", label: "全部" },
+  { key: "risk", label: "有风险" },
+  { key: "rag_empty", label: "RAG 空召回" },
+  { key: "tool_error", label: "Tool 异常" },
+  { key: "mcp_error", label: "MCP 异常" },
+  { key: "skill_findings", label: "Skill findings" },
+] as const;
 
-const TYPE_LABELS: Record<string, string> = {
-  agent: "Agent",
-  prompt: "Prompt",
-  rag: "RAG",
-  skill: "Skills",
-  mcp: "MCP",
-  tool: "Tools",
-  sandbox: "Sandbox",
-  handoff: "Handoff",
-};
-
-const SWIMLANE_ORDER = ["agent", "prompt", "rag", "skill", "tool", "sandbox", "mcp", "handoff"];
-
-function normalizeType(type: string) {
-  if (type === "sandbox") return "sandbox";
-  if (type === "tool") return "tool";
-  return type;
+function statusBadge(status: string) {
+  if (status === "success") return "bg-success/10 text-success border-success/20";
+  if (status === "warning") return "bg-warning/10 text-warning border-warning/20";
+  return "bg-danger/10 text-danger border-danger/20";
 }
 
-function emptyStateMessage(runStatus?: string, traceCompleteness?: boolean, nodeCount?: number) {
+function emptyStateMessage(runStatus?: string, traceCompleteness?: boolean, groupCount?: number) {
   if (runStatus === "running") {
-    return { title: "审核仍在运行", detail: "Trace 节点将在审核完成后写入，请稍后刷新。" };
+    return { title: "审核仍在运行", detail: "Agent 执行组将在审核完成后写入，请稍后刷新。" };
   }
-  if (nodeCount === 0 && runStatus === "partial") {
+  if (groupCount === 0 && runStatus === "partial") {
     return { title: "Trace 保存失败", detail: "运行时产生了结果但数据库持久化失败，请重新执行审核。" };
   }
-  if (nodeCount === 0) {
-    return { title: "Trace 节点为空", detail: "未找到开发者 Trace 节点，可能是旧版数据或持久化异常。" };
+  if (groupCount === 0) {
+    return { title: "Trace 执行组为空", detail: "未找到 Agent 执行组，可能是旧版数据或持久化异常。" };
   }
   if (traceCompleteness === false) {
-    return { title: "Trace 不完整", detail: "部分节点缺失，请查看上方完整性提示。" };
+    return { title: "Trace 不完整", detail: "部分 Agent 执行组缺失，请查看上方完整性提示。" };
   }
-  return { title: "暂无匹配节点", detail: "当前筛选条件下没有可展示的 Trace 节点。" };
+  return { title: "暂无匹配执行组", detail: "当前筛选条件下没有可展示的 Agent 执行组。" };
+}
+
+function CallChip({ label, tone, detail }: { label: string; tone: string; detail?: string }) {
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[10px] font-bold ${tone}`}>
+      {label}
+      {detail && <span className="font-normal opacity-70">{detail}</span>}
+    </span>
+  );
+}
+
+function ExecutionTimeline({ group }: { group: AgentExecutionGroup }) {
+  const rag = group.calls.rag as Record<string, unknown> | undefined;
+  const skills = group.calls.skills as Record<string, unknown> | undefined;
+  const tools = group.calls.tools || [];
+  const sandbox = group.calls.sandbox || [];
+  const mcp = group.calls.mcp || [];
+
+  const items: { key: string; label: string; tone: string; body?: string }[] = [];
+
+  if (rag) {
+    const hit = rag.hasContent === true;
+    items.push({
+      key: "rag",
+      label: hit ? "RAG 命中" : "RAG 空召回",
+      tone: hit ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-amber-200 bg-amber-50 text-amber-800",
+      body: hit ? `${String(rag.charCount || 0)} 字` : "知识库未命中，置信度低",
+    });
+  }
+  if (skills && skills.used) {
+    const count = Number(skills.findingCount || 0);
+    items.push({
+      key: "skill",
+      label: `Skill ×${((skills.skills as string[]) || []).length}`,
+      tone: count > 0 ? "border-orange-200 bg-orange-50 text-orange-800" : "border-orange-100 bg-orange-50/50 text-orange-700",
+      body: count > 0 ? `${count} findings` : "无 findings",
+    });
+  }
+  for (const t of tools) {
+    const ok = t.status === "success";
+    items.push({
+      key: `tool-${String(t.tool || items.length)}`,
+      label: `Tool · ${String(t.tool || "call")}`,
+      tone: ok ? "border-amber-200 bg-amber-50 text-amber-800" : "border-red-200 bg-red-50 text-red-800",
+      body: `${String(t.durationMs || 0)}ms · ${String(t.status || "?")}`,
+    });
+  }
+  for (const s of sandbox) {
+    const ok = s.status === "success";
+    items.push({
+      key: `sandbox-${String(s.tool || items.length)}`,
+      label: `Sandbox · ${String(s.tool || "exec")}`,
+      tone: ok ? "border-rose-200 bg-rose-50 text-rose-800" : "border-red-200 bg-red-50 text-red-800",
+      body: `exit ${String(s.exitCode ?? "?")}`,
+    });
+  }
+  for (const m of mcp) {
+    const ok = m.status === "available";
+    items.push({
+      key: `mcp-${String(m.server || items.length)}`,
+      label: `MCP · ${String(m.server || "?")}`,
+      tone: ok ? "border-cyan-200 bg-cyan-50 text-cyan-800" : "border-slate-200 bg-slate-50 text-slate-600",
+      body: String(m.status || "?"),
+    });
+  }
+
+  if (items.length === 0) {
+    return <p className="text-[10px] text-ink/40">本 Agent 无附加调用事件</p>;
+  }
+
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {items.map((item) => (
+        <CallChip key={item.key} label={item.label} tone={item.tone} detail={item.body} />
+      ))}
+    </div>
+  );
+}
+
+function GroupDetail({ group, onClose }: { group: AgentExecutionGroup; onClose: () => void }) {
+  const rag = group.calls.rag as Record<string, unknown> | undefined;
+  const skills = group.calls.skills as Record<string, unknown> | undefined;
+
+  return (
+    <div className="rounded-xl border border-accent/20 bg-surface/30 p-4 space-y-3 text-xs">
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <span className="font-bold text-primary">{group.title}</span>
+          <p className="text-[10px] font-mono text-ink/40">{group.agent} · {group.nodeKey} · seq {group.sequence}</p>
+        </div>
+        <button onClick={onClose} className="text-ink/40 hover:text-primary shrink-0">收起</button>
+      </div>
+      <div className="grid grid-cols-3 gap-3">
+        <div><span className="text-ink/40">状态</span><p className={group.status === "success" ? "text-success" : "text-warning"}>{group.status}</p></div>
+        <div><span className="text-ink/40">耗时</span><p className="font-mono">{group.durationMs}ms</p></div>
+        <div><span className="text-ink/40">风险</span><p>{groupHasRisk(group) ? "有" : "无"}</p></div>
+      </div>
+      {rag && (
+        <div>
+          <span className="text-ink/40 font-bold">RAG</span>
+          {rag.hasContent ? (
+            <p className="mt-1 bg-emerald-50 rounded p-2 font-mono text-[11px] whitespace-pre-wrap break-words">
+              {String(rag.context || "").substring(0, 400)}
+            </p>
+          ) : (
+            <p className="mt-1 text-warning bg-warning/5 rounded p-2">空召回 — 知识库为空或未命中</p>
+          )}
+        </div>
+      )}
+      {skills && Boolean(skills.used) && (
+        <div>
+          <span className="text-ink/40 font-bold">Skills</span>
+          <p className="mt-1">{((skills.skills as string[]) || []).join(", ")}</p>
+          {Array.isArray(skills.findings) && (
+            <ul className="mt-1 list-disc list-inside text-ink/70">
+              {(skills.findings as string[]).map((f, i) => <li key={i}>{f}</li>)}
+            </ul>
+          )}
+        </div>
+      )}
+      {(group.calls.tools?.length || 0) > 0 && (
+        <div>
+          <span className="text-ink/40 font-bold">ToolCall</span>
+          <pre className="mt-1 bg-amber-50 rounded p-2 overflow-x-auto text-[10px]">{JSON.stringify(group.calls.tools, null, 2)}</pre>
+        </div>
+      )}
+      {(group.calls.sandbox?.length || 0) > 0 && (
+        <div>
+          <span className="text-ink/40 font-bold">Sandbox</span>
+          <pre className="mt-1 bg-rose-50 rounded p-2 overflow-x-auto text-[10px]">{JSON.stringify(group.calls.sandbox, null, 2)}</pre>
+        </div>
+      )}
+      {(group.calls.mcp?.length || 0) > 0 && (
+        <div>
+          <span className="text-ink/40 font-bold">MCP</span>
+          <pre className="mt-1 bg-cyan-50 rounded p-2 overflow-x-auto text-[10px]">{JSON.stringify(group.calls.mcp, null, 2)}</pre>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function AgentTraceDag({ nodes, traceId, runStatus, traceCompleteness }: Props) {
-  const [expandedNode, setExpandedNode] = useState<string | null>(null);
+  const [expandedGroup, setExpandedGroup] = useState<string | null>(null);
   const [filter, setFilter] = useState<string>("all");
 
-  const grouped = SWIMLANE_ORDER.reduce<Record<string, TraceNode[]>>((acc, lane) => {
-    acc[lane] = nodes.filter(n => normalizeType(n.type) === lane);
-    return acc;
-  }, {});
-
-  const visibleLanes = filter === "all"
-    ? SWIMLANE_ORDER.filter(l => (grouped[l]?.length ?? 0) > 0)
-    : SWIMLANE_ORDER.filter(l => l === filter && (grouped[l]?.length ?? 0) > 0);
-
-  const emptyMsg = emptyStateMessage(runStatus, traceCompleteness, nodes.length);
+  const groups = groupTraceNodes(nodes);
+  const visibleGroups = groups.filter((g) => groupMatchesFilter(g, filter));
+  const emptyMsg = emptyStateMessage(runStatus, traceCompleteness, groups.length);
+  const riskCount = groups.filter(groupHasRisk).length;
+  const ragEmptyCount = groups.filter((g) => groupMatchesFilter(g, "rag_empty")).length;
 
   return (
     <div className="space-y-4 min-w-0">
       <div>
-        <h3 className="text-lg font-bold text-primary">Agent 执行 Trace DAG</h3>
-        <p className="text-xs text-ink/50 font-mono break-all">traceId: {traceId}</p>
+        <h3 className="text-lg font-bold text-primary">Agent 执行 Trace</h3>
+        <p className="text-xs text-ink/50">按 Agent 执行顺序展示，RAG / Skill / Tool / Sandbox / MCP 绑定在对应 Agent 内部</p>
+        <p className="text-xs text-ink/50 font-mono break-all mt-1">traceId: {traceId}</p>
       </div>
 
+      {ragEmptyCount > 0 && (
+        <div className="rounded-xl border border-warning/30 bg-warning/5 px-4 py-3 text-xs text-warning">
+          知识库未命中：{ragEmptyCount} 个 Agent RAG 空召回，当前审核基于静态规则，置信度低
+        </div>
+      )}
+
       <div className="flex flex-wrap gap-1">
-        <button
-          onClick={() => setFilter("all")}
-          className={`rounded-lg px-3 py-1.5 text-xs font-bold ${filter === "all" ? "bg-accent text-white" : "bg-surface text-ink/60"}`}
-        >
-          全部 ({nodes.length})
-        </button>
-        {SWIMLANE_ORDER.map(l => {
-          const count = grouped[l]?.length ?? 0;
-          if (count === 0) return null;
+        {FILTER_OPTIONS.map((opt) => {
+          const count = opt.key === "all" ? groups.length
+            : opt.key === "risk" ? riskCount
+            : groups.filter((g) => groupMatchesFilter(g, opt.key)).length;
           return (
             <button
-              key={l}
-              onClick={() => setFilter(l)}
-              className={`rounded-lg px-3 py-1.5 text-xs font-bold ${filter === l ? "bg-accent text-white" : "bg-surface text-ink/60"}`}
+              key={opt.key}
+              onClick={() => setFilter(opt.key)}
+              className={`rounded-lg px-3 py-1.5 text-xs font-bold ${filter === opt.key ? "bg-accent text-white" : "bg-surface text-ink/60"}`}
             >
-              {TYPE_LABELS[l]} ({count})
+              {opt.label} ({count})
             </button>
           );
         })}
       </div>
 
-      <div className="space-y-4">
-        {visibleLanes.length === 0 && (
+      <div className="space-y-3">
+        {visibleGroups.length === 0 && (
           <div className="text-center py-8 space-y-2">
             <p className="text-sm font-bold text-ink/60">{emptyMsg.title}</p>
             <p className="text-xs text-ink/40 max-w-md mx-auto">{emptyMsg.detail}</p>
           </div>
         )}
-        {visibleLanes.map(lane => (
-          <div key={lane} className="rounded-xl border border-primary/10 overflow-hidden">
-            <div className={`px-4 py-2 text-xs font-bold border-b ${TYPE_COLORS[lane] || "bg-surface"}`}>
-              {TYPE_LABELS[lane] || lane} 泳道 · {grouped[lane].length} 节点
-            </div>
-            <div className="flex flex-wrap gap-2 p-3 bg-white">
-              {grouped[lane].map((node, idx) => (
-                <div key={node.id} className="flex items-center gap-1 min-w-0">
-                  {idx > 0 && <span className="text-ink/20 text-xs">→</span>}
-                  <button
-                    type="button"
-                    onClick={() => setExpandedNode(expandedNode === node.id ? null : node.id)}
-                    className={`rounded-lg border px-3 py-2 text-left text-xs transition max-w-[200px] ${
-                      expandedNode === node.id ? "border-accent ring-2 ring-accent/20" : "border-primary/10 hover:border-accent/30"
-                    }`}
-                  >
-                    <p className="font-bold text-primary truncate">{node.title}</p>
-                    <p className="text-[10px] text-ink/40 font-mono">{node.durationMs}ms · {node.status}</p>
-                  </button>
+        {visibleGroups.map((group, idx) => (
+          <div key={group.traceNodeId || `${group.agent}-${idx}`} className="rounded-xl border border-primary/10 bg-white overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setExpandedGroup(expandedGroup === group.traceNodeId ? null : group.traceNodeId)}
+              className="w-full text-left px-4 py-3 hover:bg-surface/30 transition"
+            >
+              <div className="flex items-start gap-3">
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-accent/10 text-xs font-bold text-accent">
+                  {group.sequence || idx + 1}
+                </span>
+                <div className="flex-1 min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-bold text-primary">{group.title}</span>
+                    <span className={`rounded border px-1.5 py-0.5 text-[10px] font-bold ${statusBadge(group.status)}`}>{group.status}</span>
+                    {groupHasRisk(group) && <span className="text-[10px] text-warning font-bold">有风险</span>}
+                  </div>
+                  <p className="text-[10px] font-mono text-ink/40 mt-0.5">{group.agent} · {group.nodeKey} · {group.durationMs}ms</p>
+                  <div className="mt-2">
+                    <ExecutionTimeline group={group} />
+                  </div>
                 </div>
-              ))}
-            </div>
+                {idx < visibleGroups.length - 1 && (
+                  <span className="hidden sm:block text-ink/20 text-lg self-center">↓</span>
+                )}
+              </div>
+            </button>
           </div>
         ))}
       </div>
 
-      {expandedNode && (() => {
-        const node = nodes.find(n => n.id === expandedNode);
-        if (!node) return null;
-        return (
-          <div className="rounded-xl border border-accent/20 bg-surface/30 p-4 space-y-3 text-xs">
-            <div className="flex items-center justify-between">
-              <span className="font-bold text-primary">{node.title}</span>
-              <button onClick={() => setExpandedNode(null)} className="text-ink/40 hover:text-primary">收起</button>
-            </div>
-            <div className="grid grid-cols-3 gap-3">
-              <div><span className="text-ink/40">类型</span><p className="font-mono">{node.type}</p></div>
-              <div><span className="text-ink/40">状态</span><p className={node.status === "success" ? "text-success" : "text-warning"}>{node.status}</p></div>
-              <div><span className="text-ink/40">耗时</span><p className="font-mono">{node.durationMs}ms</p></div>
-            </div>
-            {node.rag && (
-              <div>
-                <span className="text-ink/40 font-bold">RAG 召回</span>
-                {Boolean((node.rag as Record<string, unknown>).hasContent) ? (
-                  <p className="mt-1 bg-emerald-50 rounded p-2 font-mono text-[11px] whitespace-pre-wrap break-words">
-                    {String((node.rag as Record<string, unknown>).context || "").substring(0, 400)}
-                    <span className="block mt-1 text-ink/40">字数: {String((node.rag as Record<string, unknown>).charCount || "?")}</span>
-                  </p>
-                ) : (
-                  <p className="mt-1 text-warning bg-warning/5 rounded p-2">空召回 — 知识库为空或未命中</p>
-                )}
-              </div>
-            )}
-            {node.skill && (
-              <div>
-                <span className="text-ink/40 font-bold">Skills</span>
-                {Boolean((node.skill as Record<string, unknown>).used) ? (
-                  <>
-                    <p className="mt-1">{((node.skill as Record<string, unknown>).skills as string[] || []).join(", ")}</p>
-                    {Array.isArray((node.skill as Record<string, unknown>).findings) && (
-                      <ul className="mt-1 list-disc list-inside text-ink/70">
-                        {((node.skill as Record<string, unknown>).findings as string[]).map((f, i) => (
-                          <li key={i}>{f}</li>
-                        ))}
-                      </ul>
-                    )}
-                  </>
-                ) : (
-                  <p className="mt-1 text-ink/50">未使用 Skill</p>
-                )}
-              </div>
-            )}
-            {node.sandbox && (
-              <div>
-                <span className="text-ink/40 font-bold">Sandbox / ToolCall</span>
-                <pre className="mt-1 bg-rose-50 rounded p-2 overflow-x-auto">{JSON.stringify(node.sandbox, null, 2)}</pre>
-              </div>
-            )}
-            {node.mcp && (
-              <div>
-                <span className="text-ink/40 font-bold">MCP</span>
-                <pre className="mt-1 bg-cyan-50 rounded p-2 overflow-x-auto">{JSON.stringify(node.mcp, null, 2)}</pre>
-              </div>
-            )}
-          </div>
-        );
+      {expandedGroup && (() => {
+        const group = groups.find((g) => g.traceNodeId === expandedGroup);
+        if (!group) return null;
+        return <GroupDetail group={group} onClose={() => setExpandedGroup(null)} />;
       })()}
     </div>
   );

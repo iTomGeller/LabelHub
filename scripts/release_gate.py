@@ -1,4 +1,4 @@
-"""Release gate: verify build artifacts, git state, and deployed endpoints."""
+"""Release gate: verify build artifacts, trace groups, cache schema, and Grafana diagnostics."""
 import io
 import json
 import subprocess
@@ -32,38 +32,61 @@ def fetch(path, method="GET", body=None, timeout=30):
         return resp.status, resp.read().decode("utf-8", errors="replace")
 
 
+def count_trace_groups(developer_dag):
+    execution = [n for n in developer_dag if n.get("type") == "agent_execution"]
+    if execution:
+        return len(execution)
+    legacy_map = {"_tn_1", "_tn_2", "_tn_3", "_tn_4", "_tn_5", "_tn_6"}
+    groups = set()
+    for node in developer_dag:
+        node_id = node.get("id", "")
+        for suffix in legacy_map:
+            if node_id.endswith(suffix):
+                groups.add(suffix)
+    return len(groups) if groups else len(developer_dag)
+
+
+def business_trace_match(business_dag, trace_id):
+    if not business_dag or not trace_id:
+        return False
+    for node in business_dag:
+        details = node.get("details") or {}
+        if str(details.get("traceId", "")) != trace_id:
+            return False
+    return True
+
+
+def grafana_stale_panels():
+    path = ROOT / "deploy" / "grafana" / "dashboards" / "agent-rag-trace.json"
+    dash = json.loads(path.read_text(encoding="utf-8"))
+    text = json.dumps(dash, ensure_ascii=False)
+    stale = 0
+    if "RAG 命中率 (全 Agent)" in text:
+        stale += 1
+    if "1 - (sum(trace_persist_failed_total)" in text:
+        stale += 1
+    return stale
+
+
 def main():
     checks: List[tuple] = []
+    audit_data = {}
 
     def record(name: str, ok: bool, detail: str):
         checks.append((name, ok, detail))
         print(f"{'OK  ' if ok else 'FAIL'} {name}: {detail}")
 
-    # Local gates
     code, out = run(["git", "status", "--short"])
     record("git status", code == 0, out[:200] if out else "clean")
 
     code, out = run(["npm", "run", "build", "-w", "@labelhub/web"], cwd=ROOT)
     record("web build", code == 0, "compiled" if code == 0 else out[-300:])
 
-    # Remote API gates
     try:
         status, content = fetch("/agent-api/agents/health")
         record("api health", status == 200, content[:100])
     except Exception as e:
         record("api health", False, str(e))
-
-    try:
-        status, content = fetch("/agent-api/agents/audit-runs/recent?limit=5")
-        rows = json.loads(content)
-        record("recent traces", status == 200 and isinstance(rows, list), f"count={len(rows)}")
-        if rows:
-            trace_id = rows[0].get("trace_id")
-            biz = rows[0].get("business_node_count", "?")
-            dev = rows[0].get("developer_node_count", "?")
-            record("recent trace counts", True, f"trace={trace_id}, biz={biz}, dev={dev}")
-    except Exception as e:
-        record("recent traces", False, str(e))
 
     try:
         status, content = fetch(
@@ -74,29 +97,33 @@ def main():
                 "taskName": "电商评论实体抽取",
                 "instruction": "标注评论中的商品实体",
                 "sampleData": [{"text": "a"}, {"text": "b"}, {"text": "c"}],
-                "schemaComponents": [{"label": "实体", "type": "text", "dataPath": "entity"}],
+                "schemaComponents": [{"id": "entity", "label": "实体", "type": "text", "dataPath": "entity", "required": True, "validation": []}],
                 "rubricRules": [{"severity": "high", "description": "实体不能为空"}],
                 "rubricDimensions": ["准确性"],
                 "forceRun": True,
             },
         )
         data = json.loads(content)
+        audit_data.update(data)
         biz_len = len(data.get("businessDag") or [])
-        dev_len = len(data.get("developerDag") or [])
+        dev = data.get("developerDag") or []
+        groups = count_trace_groups(dev)
         complete = data.get("traceCompleteness")
+        trace_match = business_trace_match(data.get("businessDag") or [], data.get("traceId"))
         record(
             "force audit run",
-            status == 200 and biz_len == 6 and dev_len > 0,
-            f"biz={biz_len}, dev={dev_len}, complete={complete}, traceId={data.get('traceId')}",
+            status == 200 and biz_len == 6 and groups == 6 and trace_match,
+            f"biz={biz_len}, trace groups={groups}, complete={complete}, trace match={trace_match}, traceId={data.get('traceId')}",
         )
         trace_id = data.get("traceId")
         if trace_id:
             _, trace_content = fetch(f"/agent-api/agents/audit-runs/{trace_id}")
             loaded = json.loads(trace_content)
+            loaded_groups = count_trace_groups(loaded.get("developerDag") or [])
             record(
                 "trace reload",
-                len(loaded.get("businessDag") or []) == 6 and len(loaded.get("developerDag") or []) > 0,
-                f"biz={len(loaded.get('businessDag') or [])}, dev={len(loaded.get('developerDag') or [])}, complete={loaded.get('traceCompleteness')}",
+                len(loaded.get("businessDag") or []) == 6 and loaded_groups == 6,
+                f"biz={len(loaded.get('businessDag') or [])}, groups={loaded_groups}, complete={loaded.get('traceCompleteness')}",
             )
     except Exception as e:
         record("force audit run", False, str(e))
@@ -104,26 +131,26 @@ def main():
     try:
         _, content = fetch("/agent-api/actuator/prometheus")
         wanted = [
+            "agent_trace_run_total",
+            "agent_trace_node_total",
             "agent_rag_retrieval_total",
+            "agent_rag_run_empty_total",
             "agent_tool_call_total",
             "agent_mcp_call_total",
             "agent_skill_selected_total",
-            "trace_persist_failed_total",
         ]
         found = [m for m in wanted if m in content]
-        record("agent-level prometheus metrics", len(found) >= 4, f"found {len(found)}/{len(wanted)}: {', '.join(found)}")
-        agents = [
-            "task_context_builder",
-            "dataset_sampler",
-            "schema_generator",
-            "rubric_generator",
-            "critic",
-            "task_package_writer",
-        ]
-        agent_hits = [a for a in agents if f'agent="{a}"' in content or f'agent={a}' in content]
-        record("prometheus agent labels", len(agent_hits) >= 1, f"agents in metrics: {', '.join(agent_hits) or 'none yet'}")
+        bad_formula = "trace_persist_failed_total / audit_run_total" in content
+        record(
+            "agent-level prometheus metrics",
+            "agent_trace_run_total" in content and len(found) >= 5 and not bad_formula,
+            f"found {len(found)}/{len(wanted)}: {', '.join(found)}",
+        )
     except Exception as e:
         record("prometheus metrics", False, str(e))
+
+    stale = grafana_stale_panels()
+    record("grafana stale panels", stale == 0, f"grafana stale panels={stale}")
 
     try:
         for path in ["/", "/?view=trace", "/?view=settings&tab=knowledge", "/?view=settings&tab=ai"]:

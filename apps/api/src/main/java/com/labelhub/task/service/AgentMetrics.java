@@ -224,6 +224,27 @@ public class AgentMetrics {
                 .register(registry).increment();
     }
 
+    public void recordTraceRun(String status, boolean traceCompleteness, String taskId) {
+        Counter.builder("agent_trace_run_total")
+                .tag("status", safe(status))
+                .tag("trace_completeness", String.valueOf(traceCompleteness))
+                .tag("task_id", safe(taskId))
+                .register(registry).increment();
+    }
+
+    public void recordTraceNode(String agent, String node, String status, String taskId) {
+        Counter.builder("agent_trace_node_total")
+                .tag("agent", safe(agent)).tag("node", safe(node)).tag("status", safe(status))
+                .tag("task_id", safe(taskId))
+                .register(registry).increment();
+    }
+
+    public void recordRagRunEmpty(String agent, String node, String taskId) {
+        Counter.builder("agent_rag_run_empty_total")
+                .tag("agent", safe(agent)).tag("node", safe(node)).tag("task_id", safe(taskId))
+                .register(registry).increment();
+    }
+
     private static String safe(String value) {
         return value == null || value.isBlank() ? "unknown" : value;
     }

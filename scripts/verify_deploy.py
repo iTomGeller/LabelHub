@@ -1,4 +1,4 @@
-"""Verify deployed LabelHub endpoints and agent-level metrics."""
+"""Verify deployed LabelHub endpoints, trace execution groups, and Grafana diagnostics."""
 import io
 import json
 import sys
@@ -8,9 +8,10 @@ if hasattr(sys.stdout, "buffer"):
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
 BASE = "http://8.146.231.216"
+GRAFANA_DASHBOARD_PATH = "/etc/grafana/provisioning/dashboards/agent-rag-trace.json"
 
 
-def fetch(path, method="GET", body=None):
+def fetch(path, method="GET", body=None, timeout=30):
     url = BASE + path
     data = None
     headers = {}
@@ -18,22 +19,61 @@ def fetch(path, method="GET", body=None):
         data = json.dumps(body).encode("utf-8")
         headers["Content-Type"] = "application/json"
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
-    with urllib.request.urlopen(req, timeout=30) as resp:
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
         content = resp.read().decode("utf-8", errors="replace")
         return resp.status, content
 
 
+def count_trace_groups(developer_dag):
+    execution = [n for n in developer_dag if n.get("type") == "agent_execution"]
+    if execution:
+        return len(execution)
+    legacy_map = {"_tn_1", "_tn_2", "_tn_3", "_tn_4", "_tn_5", "_tn_6"}
+    groups = set()
+    for node in developer_dag:
+        node_id = node.get("id", "")
+        for suffix in legacy_map:
+            if node_id.endswith(suffix):
+                groups.add(suffix)
+    return len(groups) if groups else len(developer_dag)
+
+
+def business_trace_match(business_dag, trace_id):
+    if not business_dag or not trace_id:
+        return False
+    for node in business_dag:
+        details = node.get("details") or {}
+        if str(details.get("traceId", "")) != trace_id:
+            return False
+    return True
+
+
+def grafana_stale_panels(dashboard_json):
+    stale = 0
+    text = json.dumps(dashboard_json, ensure_ascii=False)
+    if "RAG 命中率 (全 Agent)" in text:
+        stale += 1
+    if "trace_persist_failed_total / audit_run_total" in text:
+        stale += 1
+    if "1 - (sum(trace_persist_failed_total)" in text:
+        stale += 1
+    return stale
+
+
 def main():
     checks = []
+    audit_data = {}
 
     def check(name, fn):
         try:
             result = fn()
             print(f"OK  {name}: {result}")
             checks.append(True)
+            return result
         except Exception as e:
             print(f"FAIL {name}: {e}")
             checks.append(False)
+            return None
 
     check("web home", lambda: fetch("/")[0])
     check("trace page", lambda: fetch("/?view=trace")[0])
@@ -51,32 +91,94 @@ def main():
                 "taskName": "电商评论实体抽取",
                 "instruction": "标注评论中的商品实体",
                 "sampleData": [{"text": "a"}, {"text": "b"}, {"text": "c"}],
-                "schemaComponents": [{"label": "实体", "type": "text", "dataPath": "entity"}],
+                "schemaComponents": [{"id": "entity", "label": "实体", "type": "text", "dataPath": "entity", "required": True, "validation": []}],
                 "rubricRules": [{"severity": "high", "description": "实体不能为空"}],
                 "rubricDimensions": ["准确性"],
                 "forceRun": True,
             },
         )
         data = json.loads(content)
-        biz = len(data.get("businessDag") or [])
-        dev = len(data.get("developerDag") or [])
-        return f"status={status}, traceId={data.get('traceId')}, biz={biz}, dev={dev}, complete={data.get('traceCompleteness')}"
+        audit_data.update(data)
+        biz = data.get("businessDag") or []
+        dev = data.get("developerDag") or []
+        groups = count_trace_groups(dev)
+        trace_match = business_trace_match(biz, data.get("traceId"))
+        details_ok = all(
+            isinstance((n.get("details") or {}).get("checkedItems"), list)
+            for n in biz
+        ) if biz else False
+        return (
+            f"status={status}, traceId={data.get('traceId')}, biz={len(biz)}, dev={len(dev)}, "
+            f"trace groups={groups}, business details trace match={trace_match}, structured={details_ok}, "
+            f"complete={data.get('traceCompleteness')}"
+        )
 
     check("audit run", run_audit)
+
+    def trace_groups():
+        dev = audit_data.get("developerDag") or []
+        groups = count_trace_groups(dev)
+        if groups != 6:
+            raise AssertionError(f"expected 6 execution groups, got {groups}")
+        types = {n.get("type") for n in dev}
+        if "agent_execution" in types:
+            bad = [t for t in types if t not in ("agent_execution",)]
+            if bad:
+                raise AssertionError(f"unexpected top-level trace types: {bad}")
+        return f"trace groups={groups}"
+
+    check("trace execution groups", trace_groups)
+
+    def business_details():
+        biz = audit_data.get("businessDag") or []
+        trace_id = audit_data.get("traceId")
+        if not business_trace_match(biz, trace_id):
+            raise AssertionError("businessDag details.traceId mismatch")
+        evidence_types = set()
+        for node in biz:
+            for item in (node.get("details") or {}).get("evidenceItems") or []:
+                if isinstance(item, dict):
+                    evidence_types.add(item.get("type"))
+        if len(evidence_types) < 1:
+            raise AssertionError("expected structured evidenceItems")
+        return f"business details trace match=True, evidence types={sorted(evidence_types)}"
+
+    check("business details trace match", business_details)
 
     def metrics():
         _, content = fetch("/agent-api/actuator/prometheus")
         wanted = [
             "audit_run_total",
+            "agent_trace_run_total",
+            "agent_trace_node_total",
             "agent_rag_retrieval_total",
+            "agent_rag_run_empty_total",
             "agent_tool_call_total",
             "agent_mcp_call_total",
             "agent_skill_selected_total",
         ]
         found = [m for m in wanted if m in content]
+        if "agent_trace_run_total" not in content:
+            raise AssertionError("missing agent_trace_run_total")
         return f"found {len(found)}/{len(wanted)}: {', '.join(found)}"
 
     check("prometheus metrics", metrics)
+
+    def grafana_dashboard():
+        stale = 0
+        try:
+            with open(GRAFANA_DASHBOARD_PATH, encoding="utf-8") as f:
+                dash = json.load(f)
+            stale = grafana_stale_panels(dash)
+        except FileNotFoundError:
+            with open("deploy/grafana/dashboards/agent-rag-trace.json", encoding="utf-8") as f:
+                dash = json.load(f)
+            stale = grafana_stale_panels(dash)
+        if stale > 0:
+            raise AssertionError(f"stale panels={stale}")
+        return f"grafana stale panels={stale}"
+
+    check("grafana diagnostic dashboard", grafana_dashboard)
 
     print(f"\nSummary: {sum(checks)}/{len(checks)} checks passed")
     sys.exit(0 if all(checks) else 1)

@@ -198,12 +198,35 @@ import { AuditBusinessDag, type BusinessNode } from "./AuditBusinessDag";
 type DagResultType = { pipelineId: string; stages: { stage: string; status: string; durationMs: number; output: Record<string, unknown>; summary: string }[]; allPassed: boolean };
 
 type AuditCachePayload = {
+  schemaVersion?: number;
+  detailsVersion?: number;
+  traceCompleteness?: boolean;
+  createdAt?: string;
   hash: string;
   configHash?: string;
   traceId?: string;
   businessNodes?: BusinessNode[];
   result: DagResultType;
 };
+
+const AUDIT_CACHE_SCHEMA_VERSION = 2;
+const AUDIT_DETAILS_VERSION = 2;
+
+function isValidAuditCache(cache: AuditCachePayload | null, configHash: string): boolean {
+  if (!cache) return false;
+  if (cache.schemaVersion !== AUDIT_CACHE_SCHEMA_VERSION) return false;
+  const cachedHash = cache.configHash || cache.hash;
+  if (cachedHash !== configHash) return false;
+  if (cache.traceCompleteness === false) return false;
+  if (!cache.traceId || !cache.businessNodes?.length) return false;
+  return cache.businessNodes.every((node) => {
+    const d = node.details;
+    if (!d?.agent || !d?.traceId) return false;
+    if (String(d.traceId) !== cache.traceId) return false;
+    const version = Number(d.detailsVersion ?? d.schemaVersion ?? 0);
+    return version >= AUDIT_DETAILS_VERSION;
+  });
+}
 
 async function computeBackendConfigHash(config: TaskConfig): Promise<string> {
   const canonical = JSON.stringify({
@@ -397,6 +420,10 @@ export function TaskStepper({ taskId, initialStep }: { taskId?: string; initialS
             if (report) setDagReport(report);
             const hash = extras?.configHash || (await computeBackendConfigHash(config));
             const cacheEntry: AuditCachePayload = {
+              schemaVersion: AUDIT_CACHE_SCHEMA_VERSION,
+              detailsVersion: AUDIT_DETAILS_VERSION,
+              traceCompleteness: extras?.traceCompleteness ?? true,
+              createdAt: new Date().toISOString(),
               hash,
               configHash: extras?.configHash || hash,
               traceId: extras?.traceId,
@@ -1160,7 +1187,7 @@ function StepPublish({
   onDagResult: (
     passed: boolean,
     report?: { pipelineId: string; allPassed: boolean; totalMs: number; stages: { stage: string; status: string; durationMs: number; summary: string }[] },
-    extras?: { traceId?: string; configHash?: string; businessNodes?: BusinessNode[] }
+    extras?: { traceId?: string; configHash?: string; businessNodes?: BusinessNode[]; traceCompleteness?: boolean }
   ) => void;
   dagCache: AuditCachePayload | null;
   onJumpToStep: (step: string) => void;
@@ -1175,6 +1202,40 @@ function StepPublish({
   const [fromCache, setFromCache] = useState(false);
   const [showDevTrace, setShowDevTrace] = useState(false);
   const [currentHash, setCurrentHash] = useState("");
+
+  async function applyAuditPayload(data: {
+    traceId?: string;
+    configHash?: string;
+    status?: string;
+    durationMs?: number;
+    fromCache?: boolean;
+    traceCompleteness?: boolean;
+    businessDag?: BusinessNode[];
+    developerDag?: { id: string; type: string; title: string; status: string; durationMs: number }[];
+  }, hash: string) {
+    const nodes: BusinessNode[] = data.businessDag || [];
+    setBusinessNodes(nodes);
+    setTraceNodes(data.developerDag || []);
+    setTraceId(data.traceId || "");
+    setFromCache(data.fromCache === true);
+
+    const ap = data.status === "success";
+    const totalMs = data.durationMs || 0;
+    const stages = nodes.map((n: BusinessNode) => ({
+      stage: n.nodeKey, status: n.status, durationMs: n.durationMs, summary: n.summary, output: {},
+    }));
+
+    setDagResult({ pipelineId: data.traceId || "", stages, allPassed: ap });
+    const backendHash = data.configHash || hash;
+    setDagHash(backendHash);
+    setCurrentHash(backendHash);
+    onDagResult(ap, { pipelineId: data.traceId || "", allPassed: ap, totalMs, stages }, {
+      traceId: data.traceId,
+      configHash: data.configHash,
+      businessNodes: nodes,
+      traceCompleteness: data.traceCompleteness,
+    });
+  }
 
   async function runAuditCheck(forceRun = false) {
     setDagLoading(true);
@@ -1195,28 +1256,27 @@ function StepPublish({
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
+      const hash = data.configHash || currentHash || (await computeBackendConfigHash(config));
+      await applyAuditPayload(data, hash);
 
-      const nodes: BusinessNode[] = data.businessDag || [];
-      setBusinessNodes(nodes);
-      setTraceNodes(data.developerDag || []);
-      setTraceId(data.traceId || "");
-      setFromCache(data.fromCache === true);
-
-      const ap = data.status === "success";
-      const totalMs = data.durationMs || 0;
-      const stages = nodes.map((n: BusinessNode) => ({
-        stage: n.nodeKey, status: n.status, durationMs: n.durationMs, summary: n.summary, output: {},
-      }));
-
-      setDagResult({ pipelineId: data.traceId, stages, allPassed: ap });
-      const backendHash = data.configHash || currentHash;
-      setDagHash(backendHash);
-      setCurrentHash(backendHash);
-      onDagResult(ap, { pipelineId: data.traceId, allPassed: ap, totalMs, stages }, {
+      const cacheEntry: AuditCachePayload = {
+        schemaVersion: AUDIT_CACHE_SCHEMA_VERSION,
+        detailsVersion: AUDIT_DETAILS_VERSION,
+        traceCompleteness: data.traceCompleteness !== false,
+        createdAt: new Date().toISOString(),
+        hash,
+        configHash: data.configHash || hash,
         traceId: data.traceId,
-        configHash: data.configHash,
-        businessNodes: nodes,
-      });
+        businessNodes: data.businessDag || [],
+        result: {
+          pipelineId: data.traceId || "",
+          stages: (data.businessDag || []).map((n: BusinessNode) => ({
+            stage: n.nodeKey, status: n.status, durationMs: n.durationMs, summary: n.summary, output: {},
+          })),
+          allPassed: data.status === "success",
+        },
+      };
+      saveAuditCache(config.taskId, cacheEntry);
     } catch (e) {
       alert("审核执行失败: " + (e instanceof Error ? e.message : ""));
       onDagResult(false);
@@ -1233,25 +1293,40 @@ function StepPublish({
       if (cancelled) return;
       setCurrentHash(hash);
 
-      const cacheHash = dagCache?.configHash || dagCache?.hash;
-      if (dagCache && cacheHash === hash) {
-        setDagResult(dagCache.result);
+      try {
+        const serverRes = await fetch(`/agent-api/agents/audit-runs/by-task/${encodeURIComponent(config.taskId)}?configHash=${encodeURIComponent(hash)}`);
+        if (serverRes.ok) {
+          const data = await serverRes.json();
+          if (!cancelled) await applyAuditPayload(data, hash);
+          return;
+        }
+      } catch {
+        /* server unavailable — fall back to local cache */
+      }
+
+      if (isValidAuditCache(dagCache, hash)) {
+        setDagResult(dagCache!.result);
         setDagHash(hash);
         setFromCache(true);
-        if (dagCache.businessNodes?.length) setBusinessNodes(dagCache.businessNodes);
-        if (dagCache.traceId) setTraceId(dagCache.traceId);
-        const totalMs = dagCache.result.stages?.reduce((s: number, x: { durationMs: number }) => s + x.durationMs, 0) || 0;
-        onDagResult(dagCache.result.allPassed === true, {
-          pipelineId: dagCache.traceId || dagCache.result.pipelineId,
-          allPassed: dagCache.result.allPassed,
+        if (dagCache!.businessNodes?.length) setBusinessNodes(dagCache!.businessNodes);
+        if (dagCache!.traceId) setTraceId(dagCache!.traceId);
+        const totalMs = dagCache!.result.stages?.reduce((s: number, x: { durationMs: number }) => s + x.durationMs, 0) || 0;
+        onDagResult(dagCache!.result.allPassed === true, {
+          pipelineId: dagCache!.traceId || dagCache!.result.pipelineId,
+          allPassed: dagCache!.result.allPassed,
           totalMs,
-          stages: dagCache.result.stages.map(s => ({ stage: s.stage, status: s.status, durationMs: s.durationMs, summary: s.summary })),
+          stages: dagCache!.result.stages.map(s => ({ stage: s.stage, status: s.status, durationMs: s.durationMs, summary: s.summary })),
         }, {
-          traceId: dagCache.traceId,
+          traceId: dagCache!.traceId,
           configHash: hash,
-          businessNodes: dagCache.businessNodes,
+          businessNodes: dagCache!.businessNodes,
+          traceCompleteness: dagCache!.traceCompleteness,
         });
         return;
+      }
+
+      if (dagCache) {
+        try { localStorage.removeItem(`labelhub_audit_run_${config.taskId}`); } catch { /* ignore */ }
       }
 
       if (!dagResult && !dagLoading && config.taskName.trim()) {
@@ -1263,7 +1338,7 @@ function StepPublish({
     return () => { cancelled = true; };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const isCacheValid = (dagHash === currentHash || dagCache?.configHash === currentHash) && dagResult !== null;
+  const isCacheValid = isValidAuditCache(dagCache, currentHash) && dagResult !== null;
   const canPublish = allPassed && dagResult?.allPassed === true;
   const failedChecks = checks.filter(c => !c.ok);
 

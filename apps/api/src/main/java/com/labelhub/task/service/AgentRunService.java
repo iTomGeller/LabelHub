@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.*;
+import java.util.stream.Stream;
 
 @Service
 public class AgentRunService {
@@ -27,6 +28,8 @@ public class AgentRunService {
         "comprehensive_assessment", "critic",
         "publish_readiness", "task_package_writer"
     );
+
+    private static final int DETAILS_VERSION = 2;
 
     private final JdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
@@ -168,18 +171,169 @@ public class AgentRunService {
         agentMetrics.recordToolCallDuration(agent, nodeKey, result.toolName(), result.durationMs(), taskId, traceId);
     }
 
-    private Map<String, Object> enrichDetails(String agent, String nodeKey, String traceId,
-                                              Map<String, Object> base, String ragStatus,
-                                              int skillCount, int toolCallCount, int mcpCount) {
-        Map<String, Object> enriched = new LinkedHashMap<>(base);
+    private Map<String, Object> buildStructuredDetails(
+            String agent, String nodeKey, String traceId, String nodeStatus,
+            List<Map<String, Object>> checkedItems,
+            List<Map<String, Object>> criteria,
+            List<Map<String, Object>> actual,
+            List<Map<String, Object>> evidenceItems,
+            Map<String, Object> calls,
+            String riskLevel, String riskReason,
+            String actionLabel, String actionStep, String actionReason,
+            String ragStatus, int skillCount, int toolCallCount, int mcpCount) {
+        Map<String, Object> enriched = new LinkedHashMap<>();
+        enriched.put("schemaVersion", DETAILS_VERSION);
+        enriched.put("detailsVersion", DETAILS_VERSION);
         enriched.put("agent", agent);
         enriched.put("nodeKey", nodeKey);
         enriched.put("traceId", traceId);
+        enriched.put("checkedItems", checkedItems);
+        enriched.put("criteria", criteria);
+        enriched.put("actual", actual);
+        enriched.put("evidenceItems", evidenceItems);
+        enriched.put("calls", calls != null ? calls : Map.of());
+        enriched.put("risk", Map.of("level", riskLevel, "reason", riskReason != null ? riskReason : ""));
+        enriched.put("action", Map.of("label", actionLabel, "step", actionStep, "reason", actionReason != null ? actionReason : ""));
         enriched.put("ragStatus", ragStatus);
         enriched.put("skillCount", skillCount);
         enriched.put("toolCallCount", toolCallCount);
         enriched.put("mcpCount", mcpCount);
         return enriched;
+    }
+
+    private List<Map<String, Object>> sampleFieldNames(List<Map<String, Object>> sampleData, int limit) {
+        if (sampleData == null || sampleData.isEmpty()) return List.of();
+        Set<String> keys = new LinkedHashSet<>();
+        for (Map<String, Object> row : sampleData) {
+            if (row != null) keys.addAll(row.keySet());
+            if (keys.size() >= limit) break;
+        }
+        return keys.stream().limit(limit).map(k -> Map.<String, Object>of("label", k, "value", k, "status", "present")).toList();
+    }
+
+    private List<Map<String, Object>> schemaComponentEvidence(List<Map<String, Object>> components) {
+        if (components == null || components.isEmpty()) return List.of();
+        List<Map<String, Object>> items = new ArrayList<>();
+        for (Map<String, Object> c : components) {
+            items.add(Map.of(
+                "type", "component",
+                "label", String.valueOf(c.getOrDefault("label", c.getOrDefault("id", "?"))),
+                "value", String.format("id=%s type=%s path=%s required=%s validations=%s",
+                    c.getOrDefault("id", "?"), c.getOrDefault("type", "?"), c.getOrDefault("dataPath", "?"),
+                    c.getOrDefault("required", false),
+                    c.get("validation") instanceof List<?> v ? v.size() : 0),
+                "source", "schemaComponents"
+            ));
+        }
+        return items;
+    }
+
+    private List<Map<String, Object>> rubricRuleEvidence(List<Map<String, Object>> rules) {
+        if (rules == null || rules.isEmpty()) return List.of();
+        Map<String, Integer> severityDist = new LinkedHashMap<>();
+        int autoPass = 0;
+        for (Map<String, Object> r : rules) {
+            String sev = String.valueOf(r.getOrDefault("severity", "unknown"));
+            severityDist.merge(sev, 1, Integer::sum);
+            if (Boolean.TRUE.equals(r.get("allowAgentAutoPass"))) autoPass++;
+        }
+        List<Map<String, Object>> items = new ArrayList<>();
+        items.add(Map.of("type", "distribution", "label", "规则总数", "value", rules.size(), "source", "rubricRules"));
+        for (var e : severityDist.entrySet()) {
+            items.add(Map.of("type", "severity", "label", e.getKey(), "value", e.getValue(), "source", "rubricRules"));
+        }
+        items.add(Map.of("type", "auto_pass", "label", "允许自动通过", "value", autoPass, "source", "rubricRules"));
+        return items;
+    }
+
+    private Map<String, Object> buildCallsEnvelope(
+            Map<String, Object> ragInfo, Map<String, Object> skillInfo,
+            List<Map<String, Object>> tools, List<Map<String, Object>> sandbox,
+            List<Map<String, Object>> mcp) {
+        Map<String, Object> calls = new LinkedHashMap<>();
+        calls.put("rag", ragInfo);
+        calls.put("skills", skillInfo);
+        calls.put("tools", tools != null ? tools : List.of());
+        calls.put("sandbox", sandbox != null ? sandbox : List.of());
+        calls.put("mcp", mcp != null ? mcp : List.of());
+        return calls;
+    }
+
+    private Map<String, Object> buildRagInfo(String ragContext, long durationMs) {
+        if (ragContext != null && !ragContext.isBlank()) {
+            return Map.of(
+                "source", "knowledge_base",
+                "hasContent", true,
+                "charCount", ragContext.length(),
+                "durationMs", durationMs,
+                "context", ragContext.length() > 300 ? ragContext.substring(0, 300) + "…" : ragContext,
+                "retrievedChunks", ragContext.lines().filter(l -> !l.isBlank()).limit(5).toList()
+            );
+        }
+        return Map.of("source", "knowledge_base", "hasContent", false, "charCount", 0, "durationMs", durationMs);
+    }
+
+    private Map<String, Object> buildSkillInfo(List<SkillRegistryService.SkillMeta> skills,
+                                               List<SkillRegistryService.SkillFinding> findings) {
+        if (skills.isEmpty()) {
+            return Map.of("used", false, "skills", List.of(), "findingCount", findings.size(), "findings", List.of());
+        }
+        return Map.of(
+            "used", true,
+            "skills", skills.stream().map(SkillRegistryService.SkillMeta::name).toList(),
+            "findingCount", findings.size(),
+            "findings", findings.stream().map(SkillRegistryService.SkillFinding::description).toList(),
+            "severities", findings.stream().map(SkillRegistryService.SkillFinding::severity).toList()
+        );
+    }
+
+    private Map<String, Object> sandboxToCall(SandboxExecutionService.SandboxResult result, String callKind) {
+        return Map.of(
+            "callKind", callKind,
+            "tool", result.toolName(),
+            "status", result.status(),
+            "exitCode", result.exitCode(),
+            "findings", result.findings(),
+            "durationMs", result.durationMs()
+        );
+    }
+
+    private TraceNode buildAgentExecutionNode(
+            String id, String agent, String nodeKey, int sequence, String title, String status, long durationMs,
+            String ragContext, long ragDurationMs,
+            List<SkillRegistryService.SkillMeta> skills,
+            List<SkillRegistryService.SkillFinding> findings,
+            List<SandboxExecutionService.SandboxResult> sandboxResults,
+            List<Map<String, Object>> mcpCalls) {
+        Map<String, Object> ragInfo = buildRagInfo(ragContext, ragDurationMs);
+        Map<String, Object> skillInfo = buildSkillInfo(skills, findings);
+        List<Map<String, Object>> tools = new ArrayList<>();
+        List<Map<String, Object>> sandboxCalls = new ArrayList<>();
+        if (sandboxResults != null) {
+            for (SandboxExecutionService.SandboxResult r : sandboxResults) {
+                Map<String, Object> call = sandboxToCall(r, r.toolName().contains("sandbox") ? "sandbox" : "tool");
+                if ("sandbox".equals(call.get("callKind"))) sandboxCalls.add(call);
+                else tools.add(call);
+            }
+        }
+        Map<String, Object> calls = buildCallsEnvelope(ragInfo, skillInfo, tools, sandboxCalls, mcpCalls);
+        Map<String, Object> outputPreview = new LinkedHashMap<>();
+        outputPreview.put("agent", agent);
+        outputPreview.put("nodeKey", nodeKey);
+        outputPreview.put("sequence", sequence);
+        outputPreview.put("phase", "execute");
+        outputPreview.put("callKind", "agent_execution");
+        outputPreview.put("calls", calls);
+
+        Map<String, Object> mcpInfo = mcpCalls != null && !mcpCalls.isEmpty() ? Map.of("probes", mcpCalls) : null;
+        Map<String, Object> primarySandbox = sandboxCalls.isEmpty() ? (tools.isEmpty() ? null : tools.get(0)) : sandboxCalls.get(0);
+
+        return new TraceNode(id, "agent_execution", title, status, durationMs, null, outputPreview,
+            null, ragInfo, skillInfo, mcpInfo, primarySandbox, List.of());
+    }
+
+    private void recordExecutionMetrics(String agent, String nodeKey, String status, String taskId, String traceId) {
+        agentMetrics.recordTraceNode(agent, nodeKey, status, taskId);
     }
 
     private AgentRunResult executeFullRun(AuditRequest request, String configHash) {
@@ -218,21 +372,42 @@ public class AgentRunService {
         String instrImpact = instrStatus.equals("warning") ? "说明不清晰可能导致标注员理解偏差和频繁的确认沟通，降低整体吞吐率" : "";
         String instrSuggestion = instrFindings.isEmpty() ? "建议后续根据 bad case 继续丰富边界说明" : instrFindings.get(0).suggestion();
         String ragStatus1 = ragContext1.isBlank() ? "empty" : "hit";
+        Map<String, Object> ragInfo1 = buildRagInfo(ragContext1, ragDuration1);
+        Map<String, Object> skillInfo1 = buildSkillInfo(instructionSkills, instrFindings);
+        Map<String, Object> calls1 = buildCallsEnvelope(ragInfo1, skillInfo1, List.of(), List.of(), List.of());
 
-        Map<String, Object> instrDetails = enrichDetails(agent1, "task_description", traceId, Map.of(
-            "checkedItems", "目标定义, 实体边界, 判罚逻辑, 格式要求",
-            "criteria", "无高危严重度发现项",
-            "actual", instrFindings.isEmpty() ? "0 项高危问题" : instrFindings.size() + " 项需优化",
-            "evidenceItems", instrFindings.stream().map(SkillRegistryService.SkillFinding::description).toList(),
-            "risk", instrImpact,
-            "action", instrSuggestion
-        ), ragStatus1, instructionSkills.size(), 0, 0);
+        Map<String, Object> instrDetails = buildStructuredDetails(
+            agent1, "task_description", traceId, instrStatus,
+            List.of(
+                Map.of("label", "任务名称", "value", request.taskName() != null ? request.taskName() : "", "status", request.taskName() != null && !request.taskName().isBlank() ? "ok" : "missing"),
+                Map.of("label", "任务说明字数", "value", request.instruction() != null ? request.instruction().length() : 0, "status", "ok"),
+                Map.of("label", "Skill 检查项", "value", instructionSkills.size(), "status", instructionSkills.isEmpty() ? "warn" : "ok")
+            ),
+            List.of(
+                Map.of("label", "无高危 Skill finding", "expected", "0 high severity", "operator", "eq"),
+                Map.of("label", "说明非空", "expected", "> 0 chars", "operator", "gt")
+            ),
+            List.of(
+                Map.of("label", "高危 findings", "value", instrFindings.stream().filter(f -> "high".equals(f.severity())).count(), "status", instrFindings.stream().anyMatch(f -> "high".equals(f.severity())) ? "fail" : "ok"),
+                Map.of("label", "RAG 召回", "value", ragStatus1, "status", "empty".equals(ragStatus1) ? "warn" : "ok")
+            ),
+            instrFindings.stream().map(f -> Map.<String, Object>of("type", "skill_finding", "label", f.skillName(), "value", f.description(), "source", "skill")).toList(),
+            calls1,
+            instrStatus.equals("warning") ? "high" : "low",
+            instrImpact,
+            instrFindings.isEmpty() ? "继续观察" : "优化说明",
+            instrFindings.isEmpty() ? "upload" : "upload",
+            instrSuggestion,
+            ragStatus1, instructionSkills.size(), 0, 0
+        );
 
         businessNodes.add(new BusinessNode(traceId + "_bn_1", "task_description", "任务说明", instrStatus, instrSummary, instrEvidence, instrImpact, instrSuggestion, ragContext1.isEmpty() ? List.of() : List.of("标注规范"), "upload", node1Duration, instrDetails));
-        traceNodes.add(buildTraceNode(traceId + "_tn_1", "agent", "任务说明审核", instrStatus, node1Duration, ragContext1, instructionSkills, instrFindings, null, null));
+        traceNodes.add(buildAgentExecutionNode(traceId + "_tn_1", agent1, "task_description", 1, "任务说明审核", instrStatus, node1Duration, ragContext1, ragDuration1, instructionSkills, instrFindings, List.of(), List.of()));
         recordRagMetrics(agent1, "task_description", ragContext1, ragDuration1, taskId, traceId);
+        if (ragContext1.isBlank()) agentMetrics.recordRagRunEmpty(agent1, "task_description", taskId);
         recordSkillMetrics(agent1, "task_description", instructionSkills, instrFindings, taskId, traceId);
-        agentMetrics.recordAuditNodeDuration("task_description", "agent", node1Duration);
+        recordExecutionMetrics(agent1, "task_description", instrStatus, taskId, traceId);
+        agentMetrics.recordAuditNodeDuration("task_description", "agent_execution", node1Duration);
 
         // Node 2: Sample Data Check
         String agent2 = NODE_AGENT_MAP.get("sample_data");
@@ -247,21 +422,46 @@ public class AgentRunService {
         String dataStatus = dataResult.exitCode() == 0 && sampleCount >= 3 ? "success" : "warning";
         String dataSummary = sampleCount == 0 ? "缺少样例数据" : String.format("共 %d 条样例数据，%s", sampleCount, dataResult.findings().isEmpty() ? "字段覆盖完整，数据有效" : dataResult.findings().get(0));
         String ragStatus2 = ragContext2.isBlank() ? "empty" : "hit";
+        Map<String, Object> ragInfo2 = buildRagInfo(ragContext2, ragDuration2);
+        Map<String, Object> skillInfo2 = buildSkillInfo(List.of(), List.of());
+        Map<String, Object> calls2 = buildCallsEnvelope(ragInfo2, skillInfo2, List.of(), List.of(sandboxToCall(dataResult, "sandbox")), List.of());
+        List<Map<String, Object>> fieldEvidence = sampleFieldNames(request.sampleData(), 8);
 
-        Map<String, Object> dataDetails = enrichDetails(agent2, "sample_data", traceId, Map.of(
-            "checkedItems", "样本数量, 字段存在性, 结构一致性",
-            "criteria", "样本数 >= 3, 沙盒校验返回成功",
-            "actual", "实际上传 " + sampleCount + " 条",
-            "evidenceItems", dataResult.findings(),
-            "risk", dataStatus.equals("warning") ? "样例不足会导致后续无法为 AI/标注员提供有效的 Few-Shot 提示，影响启动准确率" : "",
-            "action", dataResult.findings().isEmpty() ? "无需动作" : "请返回 [数据上传] 步骤补充更多样例，或修复字段为空的数据"
-        ), ragStatus2, 0, 1, 0);
+        Map<String, Object> dataDetails = buildStructuredDetails(
+            agent2, "sample_data", traceId, dataStatus,
+            List.of(
+                Map.of("label", "样例条数", "value", sampleCount, "status", sampleCount >= 3 ? "ok" : "warn"),
+                Map.of("label", "字段覆盖", "value", fieldEvidence.size() + " 个字段", "status", fieldEvidence.isEmpty() ? "warn" : "ok")
+            ),
+            List.of(
+                Map.of("label", "最少样例数", "expected", ">= 3", "operator", "gte"),
+                Map.of("label", "沙盒校验", "expected", "exitCode=0", "operator", "eq")
+            ),
+            List.of(
+                Map.of("label", "实际上传", "value", sampleCount, "status", sampleCount >= 3 ? "ok" : "fail"),
+                Map.of("label", "沙盒 exitCode", "value", dataResult.exitCode(), "status", dataResult.exitCode() == 0 ? "ok" : "fail"),
+                Map.of("label", "RAG 召回", "value", ragStatus2, "status", "empty".equals(ragStatus2) ? "warn" : "ok")
+            ),
+            Stream.concat(
+                fieldEvidence.stream().map(f -> Map.<String, Object>of("type", "field", "label", f.get("label"), "value", f.get("value"), "source", "sampleData")),
+                dataResult.findings().stream().map(f -> Map.<String, Object>of("type", "sandbox_finding", "label", "finding", "value", f, "source", "dataset_check"))
+            ).toList(),
+            calls2,
+            dataStatus.equals("warning") ? "high" : "low",
+            dataStatus.equals("warning") ? "样例不足会导致后续无法为 AI/标注员提供有效的 Few-Shot 提示，影响启动准确率" : "",
+            dataResult.findings().isEmpty() ? "无需动作" : "补充样例",
+            "upload",
+            dataResult.findings().isEmpty() ? "" : "请返回 [数据上传] 步骤补充更多样例，或修复字段为空的数据",
+            ragStatus2, 0, 0, 0
+        );
 
         businessNodes.add(new BusinessNode(traceId + "_bn_2", "sample_data", "样例数据", dataStatus, dataSummary, ragContext2.isEmpty() ? "通过配置校验器直接检查" : "参考数据规范", dataStatus.equals("warning") ? "数据不足可能影响 AI 生成质量" : "", dataResult.findings().isEmpty() ? "" : "补充更多样例或修复空字段", ragContext2.isEmpty() ? List.of() : List.of("数据规范"), "upload", node2Duration, dataDetails));
-        traceNodes.add(buildTraceNode(traceId + "_tn_2", "sandbox", "数据集校验", dataStatus, node2Duration, ragContext2, List.of(), List.of(), dataResult, null));
+        traceNodes.add(buildAgentExecutionNode(traceId + "_tn_2", agent2, "sample_data", 2, "样例数据校验", dataStatus, node2Duration, ragContext2, ragDuration2, List.of(), List.of(), List.of(dataResult), List.of()));
         recordRagMetrics(agent2, "sample_data", ragContext2, ragDuration2, taskId, traceId);
+        if (ragContext2.isBlank()) agentMetrics.recordRagRunEmpty(agent2, "sample_data", taskId);
         recordSandboxMetrics(agent2, "sample_data", dataResult, taskId, traceId);
-        agentMetrics.recordAuditNodeDuration("sample_data", "sandbox", node2Duration);
+        recordExecutionMetrics(agent2, "sample_data", dataStatus, taskId, traceId);
+        agentMetrics.recordAuditNodeDuration("sample_data", "agent_execution", node2Duration);
 
         // Node 3: Schema Template Check
         String agent3 = NODE_AGENT_MAP.get("annotation_template");
@@ -283,22 +483,47 @@ public class AgentRunService {
         String schemaStatus = schemaResult.exitCode() == 0 && compCount > 0 && schemaFindings.stream().noneMatch(f -> "high".equals(f.severity())) ? "success" : "warning";
         String schemaSummary = compCount == 0 ? "缺少标注模板组件" : String.format("%d 个标注组件，%s", compCount, schemaResult.findings().isEmpty() ? "与样例映射正确" : schemaResult.findings().get(0));
         String ragStatus3 = ragContext3.isBlank() ? "empty" : "hit";
+        List<Map<String, Object>> compEvidence = schemaComponentEvidence(request.schemaComponents());
+        Map<String, Object> ragInfo3 = buildRagInfo(ragContext3, ragDuration3);
+        Map<String, Object> skillInfo3 = buildSkillInfo(schemaSkills, schemaFindings);
+        Map<String, Object> calls3 = buildCallsEnvelope(ragInfo3, skillInfo3, List.of(sandboxToCall(schemaResult, "tool")), List.of(), List.of());
 
-        Map<String, Object> schemaDetails = enrichDetails(agent3, "annotation_template", traceId, Map.of(
-            "checkedItems", "组件有效性, 数据源映射关系, 必填项约束",
-            "criteria", "组件数 > 0 且沙盒/Skill无高危报错",
-            "actual", "有效组件 " + compCount + " 个",
-            "evidenceItems", schemaFindings.stream().map(SkillRegistryService.SkillFinding::description).toList(),
-            "risk", schemaStatus.equals("warning") ? "模板残缺或字段未映射会导致标注页无法正确渲染表单，前端无法收集结果" : "",
-            "action", schemaFindings.isEmpty() ? "无需动作" : schemaFindings.get(0).suggestion()
-        ), ragStatus3, schemaSkills.size(), 1, 0);
+        Map<String, Object> schemaDetails = buildStructuredDetails(
+            agent3, "annotation_template", traceId, schemaStatus,
+            List.of(
+                Map.of("label", "组件数量", "value", compCount, "status", compCount > 0 ? "ok" : "fail"),
+                Map.of("label", "Skill 覆盖", "value", schemaSkills.size(), "status", "ok")
+            ),
+            List.of(
+                Map.of("label", "组件数", "expected", "> 0", "operator", "gt"),
+                Map.of("label", "无高危 Skill finding", "expected", "0 high", "operator", "eq")
+            ),
+            List.of(
+                Map.of("label", "有效组件", "value", compCount, "status", compCount > 0 ? "ok" : "fail"),
+                Map.of("label", "沙盒 exitCode", "value", schemaResult.exitCode(), "status", schemaResult.exitCode() == 0 ? "ok" : "fail"),
+                Map.of("label", "RAG 召回", "value", ragStatus3, "status", "empty".equals(ragStatus3) ? "warn" : "ok")
+            ),
+            Stream.concat(
+                compEvidence.stream(),
+                schemaFindings.stream().map(f -> Map.<String, Object>of("type", "skill_finding", "label", f.skillName(), "value", f.description(), "source", "skill"))
+            ).toList(),
+            calls3,
+            schemaStatus.equals("warning") ? "high" : "low",
+            schemaStatus.equals("warning") ? "模板残缺或字段未映射会导致标注页无法正确渲染表单，前端无法收集结果" : "",
+            schemaFindings.isEmpty() ? "无需动作" : "修复模板",
+            "template",
+            schemaFindings.isEmpty() ? "" : schemaFindings.get(0).suggestion(),
+            ragStatus3, schemaSkills.size(), 1, 0
+        );
 
         businessNodes.add(new BusinessNode(traceId + "_bn_3", "annotation_template", "标注模板", schemaStatus, schemaSummary, ragContext3.isEmpty() ? "基于通用组件规范" : "参考模板规范", schemaStatus.equals("warning") ? "模板不完整会导致标注员无法正确提交" : "", schemaFindings.isEmpty() ? "" : schemaFindings.get(0).suggestion(), ragContext3.isEmpty() ? List.of() : List.of("模板规范"), "template", node3Duration, schemaDetails));
-        traceNodes.add(buildTraceNode(traceId + "_tn_3", "tool", "Schema 校验", schemaStatus, node3Duration, ragContext3, schemaSkills, schemaFindings, schemaResult, null));
+        traceNodes.add(buildAgentExecutionNode(traceId + "_tn_3", agent3, "annotation_template", 3, "标注模板校验", schemaStatus, node3Duration, ragContext3, ragDuration3, schemaSkills, schemaFindings, List.of(schemaResult), List.of()));
         recordRagMetrics(agent3, "annotation_template", ragContext3, ragDuration3, taskId, traceId);
+        if (ragContext3.isBlank()) agentMetrics.recordRagRunEmpty(agent3, "annotation_template", taskId);
         recordSkillMetrics(agent3, "annotation_template", schemaSkills, schemaFindings, taskId, traceId);
         recordSandboxMetrics(agent3, "annotation_template", schemaResult, taskId, traceId);
-        agentMetrics.recordAuditNodeDuration("annotation_template", "tool", node3Duration);
+        recordExecutionMetrics(agent3, "annotation_template", schemaStatus, taskId, traceId);
+        agentMetrics.recordAuditNodeDuration("annotation_template", "agent_execution", node3Duration);
 
         // Node 4: Quality Rules Check
         String agent4 = NODE_AGENT_MAP.get("quality_rules");
@@ -313,21 +538,46 @@ public class AgentRunService {
         String rubricStatus = rubricResult.exitCode() == 0 && ruleCount > 0 ? "success" : "warning";
         String rubricSummary = ruleCount == 0 ? "缺少质检规则" : String.format("%d 条质检规则，%s", ruleCount, rubricResult.findings().isEmpty() ? "已覆盖目标维度" : rubricResult.findings().get(0));
         String ragStatus4 = ragContext4.isBlank() ? "empty" : "hit";
+        List<Map<String, Object>> ruleEvidence = rubricRuleEvidence(request.rubricRules());
+        Map<String, Object> ragInfo4 = buildRagInfo(ragContext4, ragDuration4);
+        Map<String, Object> skillInfo4 = buildSkillInfo(List.of(), List.of());
+        Map<String, Object> calls4 = buildCallsEnvelope(ragInfo4, skillInfo4, List.of(sandboxToCall(rubricResult, "tool")), List.of(), List.of());
 
-        Map<String, Object> rubricDetails = enrichDetails(agent4, "quality_rules", traceId, Map.of(
-            "checkedItems", "规则有效性, 维度覆盖率",
-            "criteria", "规则数 > 0",
-            "actual", "实际配置了 " + ruleCount + " 条",
-            "evidenceItems", rubricResult.findings(),
-            "risk", rubricStatus.equals("warning") ? "缺乏量化的规则会导致机器和人工质检都失去标准，模型预标注的质量无法评估" : "",
-            "action", rubricResult.findings().isEmpty() ? "无需动作" : "返回 [质检规则] 步骤补充维度和规则描述"
-        ), ragStatus4, 0, 1, 0);
+        Map<String, Object> rubricDetails = buildStructuredDetails(
+            agent4, "quality_rules", traceId, rubricStatus,
+            List.of(
+                Map.of("label", "规则条数", "value", ruleCount, "status", ruleCount > 0 ? "ok" : "fail"),
+                Map.of("label", "评分维度", "value", request.rubricDimensions() != null ? request.rubricDimensions().size() : 0, "status", "ok")
+            ),
+            List.of(
+                Map.of("label", "规则数", "expected", "> 0", "operator", "gt"),
+                Map.of("label", "沙盒校验", "expected", "exitCode=0", "operator", "eq")
+            ),
+            List.of(
+                Map.of("label", "实际规则", "value", ruleCount, "status", ruleCount > 0 ? "ok" : "fail"),
+                Map.of("label", "沙盒 exitCode", "value", rubricResult.exitCode(), "status", rubricResult.exitCode() == 0 ? "ok" : "fail"),
+                Map.of("label", "RAG 召回", "value", ragStatus4, "status", "empty".equals(ragStatus4) ? "warn" : "ok")
+            ),
+            Stream.concat(
+                ruleEvidence.stream(),
+                rubricResult.findings().stream().map(f -> Map.<String, Object>of("type", "sandbox_finding", "label", "finding", "value", f, "source", "rubric_check"))
+            ).toList(),
+            calls4,
+            rubricStatus.equals("warning") ? "high" : "low",
+            rubricStatus.equals("warning") ? "缺乏量化的规则会导致机器和人工质检都失去标准，模型预标注的质量无法评估" : "",
+            rubricResult.findings().isEmpty() ? "无需动作" : "补充规则",
+            "rules",
+            rubricResult.findings().isEmpty() ? "" : "返回 [质检规则] 步骤补充维度和规则描述",
+            ragStatus4, 0, 1, 0
+        );
 
         businessNodes.add(new BusinessNode(traceId + "_bn_4", "quality_rules", "质检规则", rubricStatus, rubricSummary, ragContext4.isEmpty() ? "通用规则检查" : "参考质检规范", rubricStatus.equals("warning") ? "缺少规则可能导致审核无标准" : "", rubricResult.findings().isEmpty() ? "" : "补充质检规则和评分维度", ragContext4.isEmpty() ? List.of() : List.of("质检规则"), "rules", node4Duration, rubricDetails));
-        traceNodes.add(buildTraceNode(traceId + "_tn_4", "tool", "Rubric 校验", rubricStatus, node4Duration, ragContext4, List.of(), List.of(), rubricResult, null));
+        traceNodes.add(buildAgentExecutionNode(traceId + "_tn_4", agent4, "quality_rules", 4, "质检规则校验", rubricStatus, node4Duration, ragContext4, ragDuration4, List.of(), List.of(), List.of(rubricResult), List.of()));
         recordRagMetrics(agent4, "quality_rules", ragContext4, ragDuration4, taskId, traceId);
+        if (ragContext4.isBlank()) agentMetrics.recordRagRunEmpty(agent4, "quality_rules", taskId);
         recordSandboxMetrics(agent4, "quality_rules", rubricResult, taskId, traceId);
-        agentMetrics.recordAuditNodeDuration("quality_rules", "tool", node4Duration);
+        recordExecutionMetrics(agent4, "quality_rules", rubricStatus, taskId, traceId);
+        agentMetrics.recordAuditNodeDuration("quality_rules", "agent_execution", node4Duration);
 
         // Node 5: Comprehensive Assessment
         String agent5 = NODE_AGENT_MAP.get("comprehensive_assessment");
@@ -345,20 +595,37 @@ public class AgentRunService {
         if (ruleCount == 0) issues.add("缺少质检规则");
         if (sampleCount < 3) issues.add("样例不足 3 条");
         String ragStatus5 = ragContext5.isBlank() ? "empty" : "hit";
+        List<Map<String, Object>> depMatrix = List.of(
+            Map.of("label", "task_description", "value", instrStatus, "status", "success".equals(instrStatus) ? "ok" : "fail"),
+            Map.of("label", "sample_data", "value", dataStatus, "status", "success".equals(dataStatus) ? "ok" : "fail"),
+            Map.of("label", "annotation_template", "value", schemaStatus, "status", "success".equals(schemaStatus) ? "ok" : "fail"),
+            Map.of("label", "quality_rules", "value", rubricStatus, "status", "success".equals(rubricStatus) ? "ok" : "fail")
+        );
+        Map<String, Object> ragInfo5 = buildRagInfo(ragContext5, ragDuration5);
+        Map<String, Object> skillInfo5 = buildSkillInfo(List.of(), List.of());
+        Map<String, Object> calls5 = buildCallsEnvelope(ragInfo5, skillInfo5, List.of(), List.of(), List.of());
 
-        Map<String, Object> assessDetails = enrichDetails(agent5, "comprehensive_assessment", traceId, Map.of(
-            "checkedItems", "前置依赖的通过状态 (依赖 1-4 节点聚合结果)",
-            "criteria", "前置节点 status 必须均为 success",
-            "actual", hasAll ? "全部条件满足" : issues.size() + " 个未满足条件",
-            "evidenceItems", issues,
-            "risk", hasAll ? "" : "强行发布将会进入残缺状态，B/C端不可见",
-            "action", hasAll ? "可以进行最终封装" : "修复: " + String.join("、", issues)
-        ), ragStatus5, 0, 0, 0);
+        Map<String, Object> assessDetails = buildStructuredDetails(
+            agent5, "comprehensive_assessment", traceId, assessStatus,
+            List.of(Map.of("label", "上游依赖节点", "value", 4, "status", "ok")),
+            List.of(Map.of("label", "前置节点", "expected", "all success", "operator", "eq")),
+            depMatrix,
+            issues.stream().map(i -> Map.<String, Object>of("type", "dependency_gap", "label", "未满足", "value", i, "source", "upstream")).toList(),
+            calls5,
+            hasAll ? "low" : "high",
+            hasAll ? "" : "强行发布将会进入残缺状态，B/C端不可见",
+            hasAll ? "进入发布准备" : "修复上游",
+            "publish",
+            hasAll ? "可以进行最终封装" : "修复: " + String.join("、", issues),
+            ragStatus5, 0, 0, 0
+        );
 
         businessNodes.add(new BusinessNode(traceId + "_bn_5", "comprehensive_assessment", "综合评估", assessStatus, assessSummary, ragContext5.isEmpty() ? "静态聚合" : "参考评分标准", hasAll ? "" : "不完整的配置可能影响标注质量和效率", issues.isEmpty() ? "" : "修复: " + String.join("、", issues), ragContext5.isEmpty() ? List.of() : List.of("项目要求"), "publish", node5Duration, assessDetails));
-        traceNodes.add(buildTraceNode(traceId + "_tn_5", "agent", "综合评估", assessStatus, node5Duration, ragContext5, List.of(), List.of(), null, null));
+        traceNodes.add(buildAgentExecutionNode(traceId + "_tn_5", agent5, "comprehensive_assessment", 5, "综合评估", assessStatus, node5Duration, ragContext5, ragDuration5, List.of(), List.of(), List.of(), List.of()));
         recordRagMetrics(agent5, "comprehensive_assessment", ragContext5, ragDuration5, taskId, traceId);
-        agentMetrics.recordAuditNodeDuration("comprehensive_assessment", "agent", node5Duration);
+        if (ragContext5.isBlank()) agentMetrics.recordRagRunEmpty(agent5, "comprehensive_assessment", taskId);
+        recordExecutionMetrics(agent5, "comprehensive_assessment", assessStatus, taskId, traceId);
+        agentMetrics.recordAuditNodeDuration("comprehensive_assessment", "agent_execution", node5Duration);
 
         // Node 6: Publish Readiness
         String agent6 = NODE_AGENT_MAP.get("publish_readiness");
@@ -384,20 +651,39 @@ public class AgentRunService {
             mcpProbeResults.add(Map.of("server", server.name(), "status", mcpStatus));
         }
 
-        Map<String, Object> pkgDetails = enrichDetails(agent6, "publish_readiness", traceId, Map.of(
-            "checkedItems", "TaskPackage 结构、必填字段",
-            "criteria", "无数据类型错误、未漏传必填字段",
-            "actual", pkgStatus.equals("success") ? "契约校验通过" : "发现 Schema 异常",
-            "evidenceItems", pkgResult.findings(),
-            "risk", pkgStatus.equals("warning") ? "下游 B/C 端解析报错，导致任务不可见" : "",
-            "action", pkgStatus.equals("warning") ? "通常是服务异常，请重试或反馈给技术" : "完成",
-            "mcpProbes", mcpProbeResults
-        ), "n/a", 0, 1, mcpCount);
+        Map<String, Object> pkgDetails = buildStructuredDetails(
+            agent6, "publish_readiness", traceId, pkgStatus,
+            List.of(
+                Map.of("label", "TaskPackage.taskId", "value", request.taskId(), "status", "ok"),
+                Map.of("label", "TaskPackage.taskName", "value", request.taskName(), "status", request.taskName() != null && !request.taskName().isBlank() ? "ok" : "fail"),
+                Map.of("label", "MCP 探测", "value", mcpCount, "status", mcpCount > 0 ? "ok" : "warn")
+            ),
+            List.of(
+                Map.of("label", "契约校验", "expected", "exitCode=0", "operator", "eq"),
+                Map.of("label", "上游综合评估", "expected", "success", "operator", "eq")
+            ),
+            List.of(
+                Map.of("label", "沙盒 exitCode", "value", pkgResult.exitCode(), "status", pkgResult.exitCode() == 0 ? "ok" : "fail"),
+                Map.of("label", "上游就绪", "value", hasAll, "status", hasAll ? "ok" : "fail")
+            ),
+            Stream.concat(
+                pkgResult.findings().stream().map(f -> Map.<String, Object>of("type", "contract", "label", "finding", "value", f, "source", "package_check")),
+                mcpProbeResults.stream().map(m -> Map.<String, Object>of("type", "mcp_probe", "label", m.get("server"), "value", m.get("status"), "source", "mcp"))
+            ).toList(),
+            buildCallsEnvelope(buildRagInfo("", 0), buildSkillInfo(List.of(), List.of()), List.of(sandboxToCall(pkgResult, "tool")), List.of(), mcpProbeResults),
+            pkgStatus.equals("warning") ? "high" : "low",
+            pkgStatus.equals("warning") ? "下游 B/C 端解析报错，导致任务不可见" : "",
+            pkgStatus.equals("warning") ? "重试或反馈" : "完成",
+            "publish",
+            pkgStatus.equals("warning") ? "通常是服务异常，请重试或反馈给技术" : "完成",
+            "n/a", 0, 1, mcpCount
+        );
 
         businessNodes.add(new BusinessNode(traceId + "_bn_6", "publish_readiness", "发布准备", pkgStatus, pkgSummary, "下游 API 契约协议", pkgStatus.equals("warning") ? "不完整的任务包无法被 B/C 模块正确消费" : "", pkgResult.findings().isEmpty() ? "" : pkgResult.findings().get(0), List.of(), "publish", node6Duration, pkgDetails));
-        traceNodes.add(buildTraceNode(traceId + "_tn_6", "tool", "任务包校验", pkgStatus, node6Duration, "", List.of(), List.of(), pkgResult, Map.of("probes", mcpProbeResults)));
+        traceNodes.add(buildAgentExecutionNode(traceId + "_tn_6", agent6, "publish_readiness", 6, "发布准备校验", pkgStatus, node6Duration, "", 0, List.of(), List.of(), List.of(pkgResult), mcpProbeResults));
         recordSandboxMetrics(agent6, "publish_readiness", pkgResult, taskId, traceId);
-        agentMetrics.recordAuditNodeDuration("publish_readiness", "tool", node6Duration);
+        recordExecutionMetrics(agent6, "publish_readiness", pkgStatus, taskId, traceId);
+        agentMetrics.recordAuditNodeDuration("publish_readiness", "agent_execution", node6Duration);
 
         // Finalize persistence
         long totalDuration = System.currentTimeMillis() - runStart;
@@ -433,6 +719,7 @@ public class AgentRunService {
         }
 
         agentMetrics.recordAuditRun(overallStatus, false);
+        agentMetrics.recordTraceRun(overallStatus, completeness.complete(), taskId);
         agentMetrics.recordPipelineStage("audit_run_total", totalDuration);
         return new AgentRunResult(traceId, taskId, configHash, overallStatus, false, businessNodes, traceNodes, totalDuration, completeness.complete(), completeness.missingNodes());
     }
@@ -471,6 +758,13 @@ public class AgentRunService {
         }
         if (developer.isEmpty()) {
             missing.add("developer_trace");
+        } else {
+            long executionGroups = developer.stream().filter(n -> "agent_execution".equals(n.type())).count();
+            if (executionGroups > 0 && executionGroups < 6) {
+                missing.add("developer_trace_groups");
+            } else if (executionGroups == 0 && developer.size() < 6) {
+                missing.add("developer_trace");
+            }
         }
         boolean complete = missing.isEmpty();
         if (runRow != null && runRow.get("trace_completeness") != null) {
@@ -497,27 +791,6 @@ public class AgentRunService {
         } catch (Exception e) {
             return "hash_" + System.currentTimeMillis();
         }
-    }
-
-    private TraceNode buildTraceNode(String id, String type, String title, String status, long durationMs,
-                                     String ragContext, List<SkillRegistryService.SkillMeta> skills,
-                                     List<SkillRegistryService.SkillFinding> findings,
-                                     SandboxExecutionService.SandboxResult sandboxResult,
-                                     Map<String, Object> mcpInfo) {
-        Map<String, Object> ragInfo = ragContext != null && !ragContext.isEmpty()
-            ? Map.of("context", ragContext.length() > 300 ? ragContext.substring(0, 300) + "…" : ragContext, "hasContent", true, "charCount", ragContext.length())
-            : Map.of("hasContent", false, "charCount", 0);
-        Map<String, Object> skillInfo = skills.isEmpty()
-            ? Map.of("used", false, "skills", List.of(), "findingCount", findings.size())
-            : Map.of("used", true, "skills", skills.stream().map(SkillRegistryService.SkillMeta::name).toList(), "findingCount", findings.size(), "findings", findings.stream().map(SkillRegistryService.SkillFinding::description).toList());
-        Map<String, Object> sandboxInfo = sandboxResult == null ? null : Map.of(
-            "tool", sandboxResult.toolName(),
-            "status", sandboxResult.status(),
-            "exitCode", sandboxResult.exitCode(),
-            "findings", sandboxResult.findings(),
-            "durationMs", sandboxResult.durationMs()
-        );
-        return new TraceNode(id, type, title, status, durationMs, null, null, null, ragInfo, skillInfo, mcpInfo, sandboxInfo, List.of());
     }
 
     private List<String> persistBusinessNodes(String traceId, String taskId, List<BusinessNode> nodes) {
