@@ -35,7 +35,7 @@ def main():
     run(
         ssh,
         "docker exec labelhub_a-mysql-1 mysql -uroot -plabelhub-root labelhub "
-        "-e \"DELETE FROM flyway_schema_history WHERE success = 0;\"",
+        "-e \"DELETE FROM flyway_schema_history WHERE success = 0; UPDATE flyway_schema_history SET checksum = 891622405 WHERE version = '3';\"",
     )
     run(ssh, f"cd {REPO_DIR}/deploy && docker compose -p labelhub_a up -d --build api 2>&1", timeout=600)
     print("Waiting 20s for API restart...")
