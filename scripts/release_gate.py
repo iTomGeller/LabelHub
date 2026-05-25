@@ -5,6 +5,7 @@ import subprocess
 import sys
 import urllib.request
 from pathlib import Path
+from typing import List, Optional, Tuple
 
 if hasattr(sys.stdout, "buffer"):
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
@@ -13,7 +14,7 @@ ROOT = Path(__file__).resolve().parent.parent
 BASE = "http://8.146.231.216"
 
 
-def run(cmd: list[str], cwd: Path | None = None) -> tuple[int, str]:
+def run(cmd: List[str], cwd: Optional[Path] = None) -> Tuple[int, str]:
     result = subprocess.run(cmd, cwd=cwd or ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace")
     out = (result.stdout or "") + (result.stderr or "")
     return result.returncode, out.strip()
@@ -32,7 +33,7 @@ def fetch(path, method="GET", body=None, timeout=30):
 
 
 def main():
-    checks: list[tuple[str, bool, str]] = []
+    checks: List[tuple] = []
 
     def record(name: str, ok: bool, detail: str):
         checks.append((name, ok, detail))
