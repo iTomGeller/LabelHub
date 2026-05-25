@@ -21,6 +21,8 @@ interface TraceNode {
 interface Props {
   nodes: TraceNode[];
   traceId: string;
+  runStatus?: string;
+  traceCompleteness?: boolean;
 }
 
 const TYPE_COLORS: Record<string, string> = {
@@ -53,7 +55,23 @@ function normalizeType(type: string) {
   return type;
 }
 
-export function AgentTraceDag({ nodes, traceId }: Props) {
+function emptyStateMessage(runStatus?: string, traceCompleteness?: boolean, nodeCount?: number) {
+  if (runStatus === "running") {
+    return { title: "审核仍在运行", detail: "Trace 节点将在审核完成后写入，请稍后刷新。" };
+  }
+  if (nodeCount === 0 && runStatus === "partial") {
+    return { title: "Trace 保存失败", detail: "运行时产生了结果但数据库持久化失败，请重新执行审核。" };
+  }
+  if (nodeCount === 0) {
+    return { title: "Trace 节点为空", detail: "未找到开发者 Trace 节点，可能是旧版数据或持久化异常。" };
+  }
+  if (traceCompleteness === false) {
+    return { title: "Trace 不完整", detail: "部分节点缺失，请查看上方完整性提示。" };
+  }
+  return { title: "暂无匹配节点", detail: "当前筛选条件下没有可展示的 Trace 节点。" };
+}
+
+export function AgentTraceDag({ nodes, traceId, runStatus, traceCompleteness }: Props) {
   const [expandedNode, setExpandedNode] = useState<string | null>(null);
   const [filter, setFilter] = useState<string>("all");
 
@@ -65,6 +83,8 @@ export function AgentTraceDag({ nodes, traceId }: Props) {
   const visibleLanes = filter === "all"
     ? SWIMLANE_ORDER.filter(l => (grouped[l]?.length ?? 0) > 0)
     : SWIMLANE_ORDER.filter(l => l === filter && (grouped[l]?.length ?? 0) > 0);
+
+  const emptyMsg = emptyStateMessage(runStatus, traceCompleteness, nodes.length);
 
   return (
     <div className="space-y-4 min-w-0">
@@ -97,7 +117,10 @@ export function AgentTraceDag({ nodes, traceId }: Props) {
 
       <div className="space-y-4">
         {visibleLanes.length === 0 && (
-          <p className="text-center py-8 text-sm text-ink/40">暂无执行记录</p>
+          <div className="text-center py-8 space-y-2">
+            <p className="text-sm font-bold text-ink/60">{emptyMsg.title}</p>
+            <p className="text-xs text-ink/40 max-w-md mx-auto">{emptyMsg.detail}</p>
+          </div>
         )}
         {visibleLanes.map(lane => (
           <div key={lane} className="rounded-xl border border-primary/10 overflow-hidden">
@@ -139,25 +162,49 @@ export function AgentTraceDag({ nodes, traceId }: Props) {
               <div><span className="text-ink/40">状态</span><p className={node.status === "success" ? "text-success" : "text-warning"}>{node.status}</p></div>
               <div><span className="text-ink/40">耗时</span><p className="font-mono">{node.durationMs}ms</p></div>
             </div>
-            {node.rag && Boolean((node.rag as Record<string, unknown>).hasContent) && (
+            {node.rag && (
               <div>
                 <span className="text-ink/40 font-bold">RAG 召回</span>
-                <p className="mt-1 bg-emerald-50 rounded p-2 font-mono text-[11px] whitespace-pre-wrap break-words">
-                  {String((node.rag as Record<string, unknown>).context || "").substring(0, 400)}
-                </p>
+                {Boolean((node.rag as Record<string, unknown>).hasContent) ? (
+                  <p className="mt-1 bg-emerald-50 rounded p-2 font-mono text-[11px] whitespace-pre-wrap break-words">
+                    {String((node.rag as Record<string, unknown>).context || "").substring(0, 400)}
+                    <span className="block mt-1 text-ink/40">字数: {String((node.rag as Record<string, unknown>).charCount || "?")}</span>
+                  </p>
+                ) : (
+                  <p className="mt-1 text-warning bg-warning/5 rounded p-2">空召回 — 知识库为空或未命中</p>
+                )}
               </div>
             )}
-            {node.skill && Boolean((node.skill as Record<string, unknown>).used) && (
+            {node.skill && (
               <div>
                 <span className="text-ink/40 font-bold">Skills</span>
-                <p className="mt-1">{((node.skill as Record<string, unknown>).skills as string[] || []).join(", ")}</p>
+                {Boolean((node.skill as Record<string, unknown>).used) ? (
+                  <>
+                    <p className="mt-1">{((node.skill as Record<string, unknown>).skills as string[] || []).join(", ")}</p>
+                    {Array.isArray((node.skill as Record<string, unknown>).findings) && (
+                      <ul className="mt-1 list-disc list-inside text-ink/70">
+                        {((node.skill as Record<string, unknown>).findings as string[]).map((f, i) => (
+                          <li key={i}>{f}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </>
+                ) : (
+                  <p className="mt-1 text-ink/50">未使用 Skill</p>
+                )}
               </div>
             )}
             {node.sandbox && (
-              <pre className="bg-rose-50 rounded p-2 overflow-x-auto">{JSON.stringify(node.sandbox, null, 2)}</pre>
+              <div>
+                <span className="text-ink/40 font-bold">Sandbox / ToolCall</span>
+                <pre className="mt-1 bg-rose-50 rounded p-2 overflow-x-auto">{JSON.stringify(node.sandbox, null, 2)}</pre>
+              </div>
             )}
             {node.mcp && (
-              <pre className="bg-cyan-50 rounded p-2 overflow-x-auto">{JSON.stringify(node.mcp, null, 2)}</pre>
+              <div>
+                <span className="text-ink/40 font-bold">MCP</span>
+                <pre className="mt-1 bg-cyan-50 rounded p-2 overflow-x-auto">{JSON.stringify(node.mcp, null, 2)}</pre>
+              </div>
             )}
           </div>
         );

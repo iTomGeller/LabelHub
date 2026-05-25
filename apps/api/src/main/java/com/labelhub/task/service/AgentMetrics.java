@@ -131,38 +131,101 @@ public class AgentMetrics {
                 .register(registry).record(Duration.ofMillis(durationMs));
     }
 
-    public void recordRagRetrieval(String source, String status) {
-        Counter.builder("rag_retrieval_total")
-                .tag("source", source).tag("status", status)
+    public void recordRagRetrieval(String agent, String node, String source, String status,
+                                   String taskId, String traceId) {
+        Counter.builder("agent_rag_retrieval_total")
+                .tag("agent", safe(agent)).tag("node", safe(node))
+                .tag("source", safe(source)).tag("status", safe(status))
+                .tag("task_id", safe(taskId)).tag("trace_id", safe(traceId))
                 .register(registry).increment();
     }
 
-    public void recordRagEmptyRecall() {
-        Counter.builder("rag_empty_recall_total").register(registry).increment();
-    }
-
-    public void recordSkillSelected(String skill, String node) {
-        Counter.builder("skill_selected_total")
-                .tag("skill", skill).tag("node", node)
+    public void recordRagEmptyRecall(String agent, String node, String source,
+                                     String taskId, String traceId) {
+        Counter.builder("agent_rag_empty_total")
+                .tag("agent", safe(agent)).tag("node", safe(node)).tag("source", safe(source))
+                .tag("task_id", safe(taskId)).tag("trace_id", safe(traceId))
                 .register(registry).increment();
     }
 
-    public void recordSkillFinding(String skill, String severity) {
-        Counter.builder("skill_finding_total")
-                .tag("skill", skill).tag("severity", severity)
+    public void recordRagContextChars(String agent, String node, String source, int length,
+                                      String taskId, String traceId) {
+        DistributionSummary.builder("agent_rag_context_chars")
+                .tag("agent", safe(agent)).tag("node", safe(node)).tag("source", safe(source))
+                .tag("task_id", safe(taskId)).tag("trace_id", safe(traceId))
+                .register(registry).record(length);
+    }
+
+    public void recordRagRetrievalDuration(String agent, String node, String source, long durationMs,
+                                           String taskId, String traceId) {
+        Timer.builder("agent_rag_retrieval_duration_seconds")
+                .tag("agent", safe(agent)).tag("node", safe(node)).tag("source", safe(source))
+                .tag("task_id", safe(taskId)).tag("trace_id", safe(traceId))
+                .register(registry).record(Duration.ofMillis(durationMs));
+    }
+
+    public void recordSkillSelected(String agent, String node, String skill, String status,
+                                    String taskId, String traceId) {
+        Counter.builder("agent_skill_selected_total")
+                .tag("agent", safe(agent)).tag("node", safe(node))
+                .tag("skill", safe(skill)).tag("status", safe(status))
+                .tag("task_id", safe(taskId)).tag("trace_id", safe(traceId))
                 .register(registry).increment();
     }
 
-    public void recordMcpCall(String server, String tool, String status) {
-        Counter.builder("mcp_call_total")
-                .tag("server", server).tag("tool", tool).tag("status", status)
+    public void recordSkillFinding(String agent, String node, String skill, String severity,
+                                   String taskId, String traceId) {
+        Counter.builder("agent_skill_finding_total")
+                .tag("agent", safe(agent)).tag("node", safe(node))
+                .tag("skill", safe(skill)).tag("severity", safe(severity))
+                .tag("task_id", safe(taskId)).tag("trace_id", safe(traceId))
                 .register(registry).increment();
     }
 
-    public void recordSandboxExecution(String tool, String status) {
-        Counter.builder("sandbox_execution_total")
-                .tag("tool", tool).tag("status", status)
+    public void recordToolCall(String agent, String node, String tool, String status,
+                               String taskId, String traceId) {
+        Counter.builder("agent_tool_call_total")
+                .tag("agent", safe(agent)).tag("node", safe(node))
+                .tag("tool", safe(tool)).tag("status", safe(status))
+                .tag("task_id", safe(taskId)).tag("trace_id", safe(traceId))
                 .register(registry).increment();
+    }
+
+    public void recordToolCallDuration(String agent, String node, String tool, long durationMs,
+                                       String taskId, String traceId) {
+        Timer.builder("agent_tool_call_duration_seconds")
+                .tag("agent", safe(agent)).tag("node", safe(node)).tag("tool", safe(tool))
+                .tag("task_id", safe(taskId)).tag("trace_id", safe(traceId))
+                .register(registry).record(Duration.ofMillis(durationMs));
+    }
+
+    public void recordMcpCall(String agent, String node, String server, String tool, String status,
+                              String taskId, String traceId) {
+        Counter.builder("agent_mcp_call_total")
+                .tag("agent", safe(agent)).tag("node", safe(node))
+                .tag("server", safe(server)).tag("tool", safe(tool)).tag("status", safe(status))
+                .tag("task_id", safe(taskId)).tag("trace_id", safe(traceId))
+                .register(registry).increment();
+    }
+
+    public void recordMcpCallDuration(String agent, String node, String server, String tool, long durationMs,
+                                      String taskId, String traceId) {
+        Timer.builder("agent_mcp_call_duration_seconds")
+                .tag("agent", safe(agent)).tag("node", safe(node))
+                .tag("server", safe(server)).tag("tool", safe(tool))
+                .tag("task_id", safe(taskId)).tag("trace_id", safe(traceId))
+                .register(registry).record(Duration.ofMillis(durationMs));
+    }
+
+    public void recordTracePersistFailed(String agent, String node, String taskId, String traceId) {
+        Counter.builder("trace_persist_failed_total")
+                .tag("agent", safe(agent)).tag("node", safe(node))
+                .tag("task_id", safe(taskId)).tag("trace_id", safe(traceId))
+                .register(registry).increment();
+    }
+
+    private static String safe(String value) {
+        return value == null || value.isBlank() ? "unknown" : value;
     }
 
     public void recordTaskPublish() {

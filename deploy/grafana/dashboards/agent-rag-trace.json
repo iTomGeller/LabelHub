@@ -7,160 +7,171 @@
   "links": [],
   "panels": [
     {
-      "title": "审核运行总览",
+      "title": "审核成功率",
       "type": "stat",
-      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
-      "fieldConfig": {
-        "defaults": {
-          "noValue": "等待首次审核"
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": ["lastNotNull"],
-          "fields": "",
-          "values": false
-        }
-      },
-      "targets": [{ "expr": "sum(audit_run_total) or vector(0)", "legendFormat": "总运行次数" }]
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
+      "fieldConfig": { "defaults": { "noValue": "等待首次审核", "unit": "percentunit", "min": 0, "max": 1 }, "overrides": [] },
+      "targets": [{ "expr": "sum(audit_run_total{status=\"success\"}) / clamp_min(sum(audit_run_total), 1)", "legendFormat": "成功率" }]
     },
     {
-      "title": "缓存命中率",
-      "type": "gauge",
-      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
-      "fieldConfig": {
-        "defaults": {
-          "noValue": "等待首次审核",
-          "min": 0,
-          "max": 1,
-          "unit": "percentunit"
-        },
-        "overrides": []
-      },
-      "targets": [{ "expr": "sum(audit_cache_hit_total) / (sum(audit_cache_hit_total) + sum(audit_cache_miss_total))", "legendFormat": "命中率" }]
-    },
-    {
-      "title": "RAG 召回次数",
+      "title": "Trace 完整率",
       "type": "stat",
-      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
-      "fieldConfig": {
-        "defaults": {
-          "noValue": "等待首次审核"
-        },
-        "overrides": []
-      },
-      "targets": [{ "expr": "sum(rag_retrieval_total) or vector(0)", "legendFormat": "召回总次数" }]
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
+      "fieldConfig": { "defaults": { "noValue": "等待数据", "unit": "percentunit", "min": 0, "max": 1 }, "overrides": [] },
+      "targets": [{ "expr": "1 - (sum(trace_persist_failed_total) / clamp_min(sum(audit_run_total), 1))", "legendFormat": "完整率" }]
     },
     {
-      "title": "RAG 空召回率",
+      "title": "RAG 命中率 (全 Agent)",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
+      "fieldConfig": { "defaults": { "noValue": "等待数据", "unit": "percentunit", "min": 0, "max": 1 }, "overrides": [] },
+      "targets": [{ "expr": "sum(agent_rag_retrieval_total{status=\"hit\"}) / clamp_min(sum(agent_rag_retrieval_total), 1)", "legendFormat": "命中率" }]
+    },
+    {
+      "title": "ToolCall 成功率",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 0 },
+      "fieldConfig": { "defaults": { "noValue": "等待数据", "unit": "percentunit", "min": 0, "max": 1 }, "overrides": [] },
+      "targets": [{ "expr": "sum(agent_tool_call_total{status=\"success\"}) / clamp_min(sum(agent_tool_call_total), 1)", "legendFormat": "成功率" }]
+    },
+    {
+      "title": "MCP 可用率",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 0 },
+      "fieldConfig": { "defaults": { "noValue": "等待数据", "unit": "percentunit", "min": 0, "max": 1 }, "overrides": [] },
+      "targets": [{ "expr": "sum(agent_mcp_call_total{status=\"available\"}) / clamp_min(sum(agent_mcp_call_total), 1)", "legendFormat": "可用率" }]
+    },
+    {
+      "title": "P95 总耗时",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 0 },
+      "fieldConfig": { "defaults": { "noValue": "等待数据", "unit": "s" }, "overrides": [] },
+      "targets": [{ "expr": "histogram_quantile(0.95, sum(rate(task_pipeline_duration_bucket{stage=\"audit_run_total\"}[5m])) by (le))", "legendFormat": "P95" }]
+    },
+    {
+      "title": "task_context_builder RAG 命中率",
       "type": "gauge",
-      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "gridPos": { "h": 6, "w": 4, "x": 0, "y": 4 },
       "fieldConfig": {
-        "defaults": {
-          "noValue": "等待首次审核",
-          "min": 0,
-          "max": 1,
-          "unit": "percentunit"
-        },
+        "defaults": { "noValue": "知识库为空，当前审核置信度低", "min": 0, "max": 1, "unit": "percentunit", "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "yellow", "value": 0.5 }, { "color": "green", "value": 0.8 }] } },
         "overrides": []
       },
-      "targets": [{ "expr": "sum(rag_empty_recall_total) / clamp_min(sum(rag_retrieval_total), 1)", "legendFormat": "空召回率" }]
+      "targets": [{ "expr": "sum(agent_rag_retrieval_total{agent=\"task_context_builder\",status=\"hit\"}) / clamp_min(sum(agent_rag_retrieval_total{agent=\"task_context_builder\"}), 1)", "legendFormat": "命中率" }]
     },
     {
-      "title": "审核节点耗时分布",
+      "title": "dataset_sampler RAG 命中率",
+      "type": "gauge",
+      "gridPos": { "h": 6, "w": 4, "x": 4, "y": 4 },
+      "fieldConfig": {
+        "defaults": { "noValue": "知识库为空，当前审核置信度低", "min": 0, "max": 1, "unit": "percentunit", "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "yellow", "value": 0.5 }, { "color": "green", "value": 0.8 }] } },
+        "overrides": []
+      },
+      "targets": [{ "expr": "sum(agent_rag_retrieval_total{agent=\"dataset_sampler\",status=\"hit\"}) / clamp_min(sum(agent_rag_retrieval_total{agent=\"dataset_sampler\"}), 1)", "legendFormat": "命中率" }]
+    },
+    {
+      "title": "schema_generator RAG 命中率",
+      "type": "gauge",
+      "gridPos": { "h": 6, "w": 4, "x": 8, "y": 4 },
+      "fieldConfig": {
+        "defaults": { "noValue": "知识库为空，当前审核置信度低", "min": 0, "max": 1, "unit": "percentunit", "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "yellow", "value": 0.5 }, { "color": "green", "value": 0.8 }] } },
+        "overrides": []
+      },
+      "targets": [{ "expr": "sum(agent_rag_retrieval_total{agent=\"schema_generator\",status=\"hit\"}) / clamp_min(sum(agent_rag_retrieval_total{agent=\"schema_generator\"}), 1)", "legendFormat": "命中率" }]
+    },
+    {
+      "title": "rubric_generator RAG 命中率",
+      "type": "gauge",
+      "gridPos": { "h": 6, "w": 4, "x": 12, "y": 4 },
+      "fieldConfig": {
+        "defaults": { "noValue": "知识库为空，当前审核置信度低", "min": 0, "max": 1, "unit": "percentunit", "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "yellow", "value": 0.5 }, { "color": "green", "value": 0.8 }] } },
+        "overrides": []
+      },
+      "targets": [{ "expr": "sum(agent_rag_retrieval_total{agent=\"rubric_generator\",status=\"hit\"}) / clamp_min(sum(agent_rag_retrieval_total{agent=\"rubric_generator\"}), 1)", "legendFormat": "命中率" }]
+    },
+    {
+      "title": "critic RAG 命中率",
+      "type": "gauge",
+      "gridPos": { "h": 6, "w": 4, "x": 16, "y": 4 },
+      "fieldConfig": {
+        "defaults": { "noValue": "知识库为空，当前审核置信度低", "min": 0, "max": 1, "unit": "percentunit", "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "yellow", "value": 0.5 }, { "color": "green", "value": 0.8 }] } },
+        "overrides": []
+      },
+      "targets": [{ "expr": "sum(agent_rag_retrieval_total{agent=\"critic\",status=\"hit\"}) / clamp_min(sum(agent_rag_retrieval_total{agent=\"critic\"}), 1)", "legendFormat": "命中率" }]
+    },
+    {
+      "title": "RAG 空召回 by Agent (风险)",
+      "type": "bargauge",
+      "gridPos": { "h": 6, "w": 4, "x": 20, "y": 4 },
+      "fieldConfig": {
+        "defaults": { "noValue": "无空召回", "min": 0, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] } },
+        "overrides": []
+      },
+      "targets": [{ "expr": "sum by (agent) (agent_rag_empty_total)", "legendFormat": "{{agent}}" }]
+    },
+    {
+      "title": "RAG 召回字数 by Agent",
+      "type": "bargauge",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 10 },
+      "fieldConfig": { "defaults": { "noValue": "等待数据", "unit": "short" }, "overrides": [] },
+      "targets": [{ "expr": "sum by (agent) (rate(agent_rag_context_chars_sum[5m])) / clamp_min(sum by (agent) (rate(agent_rag_context_chars_count[5m])), 1)", "legendFormat": "{{agent}}" }]
+    },
+    {
+      "title": "Skill Findings by Agent",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
-      "fieldConfig": {
-        "defaults": {
-          "noValue": "等待首次审核",
-          "unit": "s"
-        },
-        "overrides": []
-      },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 10 },
+      "fieldConfig": { "defaults": { "noValue": "等待数据" }, "overrides": [] },
+      "targets": [{ "expr": "sum by (agent, severity) (increase(agent_skill_finding_total[5m]))", "legendFormat": "{{agent}} · {{severity}}" }]
+    },
+    {
+      "title": "ToolCall 状态 by Agent",
+      "type": "bargauge",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 10 },
+      "fieldConfig": { "defaults": { "noValue": "等待数据" }, "overrides": [] },
+      "targets": [{ "expr": "sum by (agent, status) (agent_tool_call_total)", "legendFormat": "{{agent}} · {{status}}" }]
+    },
+    {
+      "title": "MCP 状态 by Agent",
+      "type": "bargauge",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 18 },
+      "fieldConfig": { "defaults": { "noValue": "等待数据" }, "overrides": [] },
+      "targets": [{ "expr": "sum by (agent, server, status) (agent_mcp_call_total)", "legendFormat": "{{agent}} · {{server}} · {{status}}" }]
+    },
+    {
+      "title": "节点耗时 P95 by Agent",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 18 },
+      "fieldConfig": { "defaults": { "noValue": "等待数据", "unit": "s" }, "overrides": [] },
       "targets": [{ "expr": "histogram_quantile(0.95, sum(rate(audit_node_duration_seconds_bucket[5m])) by (le, node))", "legendFormat": "{{node}} P95" }]
     },
     {
-      "title": "Skill 选择频率",
+      "title": "Skill 选择 by Agent",
       "type": "bargauge",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
-      "fieldConfig": {
-        "defaults": {
-          "noValue": "等待首次审核"
-        },
-        "overrides": []
-      },
-      "targets": [{ "expr": "sum by (skill) (skill_selected_total)", "legendFormat": "{{skill}}" }]
-    },
-    {
-      "title": "Skill Findings 按严重度",
-      "type": "piechart",
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 12 },
-      "fieldConfig": {
-        "defaults": {
-          "noValue": "等待首次审核"
-        },
-        "overrides": []
-      },
-      "targets": [{ "expr": "sum by (severity) (skill_finding_total)", "legendFormat": "{{severity}}" }]
-    },
-    {
-      "title": "Sandbox 执行状态",
-      "type": "bargauge",
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 12 },
-      "fieldConfig": {
-        "defaults": {
-          "noValue": "等待首次审核"
-        },
-        "overrides": []
-      },
-      "targets": [{ "expr": "sum by (tool, status) (sandbox_execution_total)", "legendFormat": "{{tool}} - {{status}}" }]
-    },
-    {
-      "title": "MCP 调用状态",
-      "type": "bargauge",
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 12 },
-      "fieldConfig": {
-        "defaults": {
-          "noValue": "等待首次审核"
-        },
-        "overrides": []
-      },
-      "targets": [{ "expr": "sum by (server, status) (mcp_call_total)", "legendFormat": "{{server}} - {{status}}" }]
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 18 },
+      "fieldConfig": { "defaults": { "noValue": "等待数据" }, "overrides": [] },
+      "targets": [{ "expr": "sum by (agent, skill) (agent_skill_selected_total)", "legendFormat": "{{agent}} · {{skill}}" }]
     },
     {
       "title": "审核缓存命中/未命中趋势",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
-      "fieldConfig": {
-        "defaults": {
-          "noValue": "等待首次审核"
-        },
-        "overrides": []
-      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 26 },
+      "fieldConfig": { "defaults": { "noValue": "等待首次审核" }, "overrides": [] },
       "targets": [
         { "expr": "sum(rate(audit_cache_hit_total[5m]))", "legendFormat": "缓存命中" },
         { "expr": "sum(rate(audit_cache_miss_total[5m]))", "legendFormat": "缓存未命中" }
       ]
     },
     {
-      "title": "Pipeline 总耗时趋势",
+      "title": "Trace 持久化失败",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
-      "fieldConfig": {
-        "defaults": {
-          "noValue": "等待首次审核",
-          "unit": "s"
-        },
-        "overrides": []
-      },
-      "targets": [{ "expr": "histogram_quantile(0.95, sum(rate(task_pipeline_duration_bucket{stage=\"audit_run_total\"}[5m])) by (le))", "legendFormat": "P95 总耗时" }]
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 26 },
+      "fieldConfig": { "defaults": { "noValue": "无失败记录" }, "overrides": [] },
+      "targets": [{ "expr": "sum by (agent, node) (increase(trace_persist_failed_total[5m]))", "legendFormat": "{{agent}} · {{node}}" }]
     }
   ],
   "schemaVersion": 38,
   "tags": ["labelhub", "agent", "rag", "trace"],
   "templating": { "list": [] },
   "time": { "from": "now-6h", "to": "now" },
-  "title": "LabelHub Agent/RAG/Trace 监控",
+  "title": "LabelHub Agent 级监控",
   "uid": "labelhub-agent-rag-trace"
 }

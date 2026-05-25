@@ -22,16 +22,17 @@ export function SubTabs({
   children: (activeTab: string) => React.ReactNode;
 }) {
   const [internalActive, setInternalActive] = useState(defaultTab ?? tabs[0]?.key ?? "");
-  const active = controlledTab ?? internalActive;
+  const isControlled = controlledTab !== undefined;
+  const active = isControlled ? controlledTab : internalActive;
 
   useEffect(() => {
-    if (controlledTab && tabs.some((tab) => tab.key === controlledTab)) {
+    if (isControlled && controlledTab && tabs.some((tab) => tab.key === controlledTab)) {
       setInternalActive(controlledTab);
     }
-  }, [controlledTab, tabs]);
+  }, [controlledTab, isControlled, tabs]);
 
   function handleSelect(tabKey: string) {
-    if (!controlledTab) setInternalActive(tabKey);
+    setInternalActive(tabKey);
     onTabChange?.(tabKey);
   }
 

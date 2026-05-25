@@ -11,12 +11,31 @@ const TABS = [
 ];
 
 const GRAFANA_DASHBOARD_URL =
-  "/grafana/d/labelhub-agent-rag-trace/labelhub-agent-rag-trace-e79b91-e68ea7?orgId=1&from=now-6h&to=now";
+  "/grafana/d/labelhub-agent-rag-trace/labelhub-agent-rag-trace?orgId=1&from=now-6h&to=now";
+
+function resolveTab(tab?: string) {
+  return TABS.some((t) => t.key === tab) ? tab! : "ai";
+}
 
 export function SettingsView({ initialTab }: { initialTab?: string }) {
-  const validTab = TABS.some((tab) => tab.key === initialTab) ? initialTab! : "ai";
+  const [activeTab, setActiveTab] = useState(() => resolveTab(initialTab));
+
+  useEffect(() => {
+    setActiveTab(resolveTab(initialTab));
+  }, [initialTab]);
+
+  useEffect(() => {
+    function syncFromUrl() {
+      const params = new URLSearchParams(window.location.search);
+      const tab = params.get("tab");
+      if (tab) setActiveTab(resolveTab(tab));
+    }
+    window.addEventListener("popstate", syncFromUrl);
+    return () => window.removeEventListener("popstate", syncFromUrl);
+  }, []);
 
   function handleTabChange(tab: string) {
+    setActiveTab(tab);
     const url = new URL(window.location.href);
     url.searchParams.set("view", "settings");
     url.searchParams.set("tab", tab);
@@ -30,7 +49,7 @@ export function SettingsView({ initialTab }: { initialTab?: string }) {
         <p className="mt-1 text-sm text-ink/60">AI 服务监控、知识库管理、任务包导出。</p>
       </div>
 
-      <SubTabs tabs={TABS} activeTab={validTab} onTabChange={handleTabChange}>
+      <SubTabs tabs={TABS} activeTab={activeTab} onTabChange={handleTabChange}>
         {(tab) => {
           switch (tab) {
             case "ai": return <AiSettings />;
@@ -107,7 +126,7 @@ function AiSettings() {
           {testing ? "测试中…" : "测试连接"}
         </button>
         <a href={GRAFANA_DASHBOARD_URL} target="_blank" rel="noopener" className="rounded-xl border border-primary/15 px-5 py-2.5 text-sm font-bold text-primary hover:bg-surface/50">
-          打开监控面板
+          打开 Agent 级监控面板
         </a>
       </div>
 
@@ -122,7 +141,7 @@ function AiSettings() {
         <ul className="mt-2 space-y-1 text-xs text-ink/60">
           <li>DeepSeek API Key 通过服务端环境变量配置，前端无需操作</li>
           <li>创建任务时点击 AI 一键配置 即可自动生成标注方案</li>
-          <li>详细监控数据请访问 Grafana 看板</li>
+          <li>Grafana 看板按 Agent 拆分 RAG、Skill、ToolCall、MCP 指标</li>
         </ul>
       </div>
     </div>
