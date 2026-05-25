@@ -2,6 +2,10 @@
 import paramiko
 import time
 import sys
+import io
+
+if hasattr(sys.stdout, "buffer"):
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
 HOST = "8.146.231.216"
 USER = "root"
