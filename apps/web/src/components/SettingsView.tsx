@@ -10,15 +10,27 @@ const TABS = [
   { key: "export", label: "导出设置" },
 ];
 
-export function SettingsView() {
+const GRAFANA_DASHBOARD_URL =
+  "/grafana/d/labelhub-agent-rag-trace/labelhub-agent-rag-trace-e79b91-e68ea7?orgId=1&from=now-6h&to=now";
+
+export function SettingsView({ initialTab }: { initialTab?: string }) {
+  const validTab = TABS.some((tab) => tab.key === initialTab) ? initialTab! : "ai";
+
+  function handleTabChange(tab: string) {
+    const url = new URL(window.location.href);
+    url.searchParams.set("view", "settings");
+    url.searchParams.set("tab", tab);
+    window.history.replaceState(null, "", url.toString());
+  }
+
   return (
-    <div className="space-y-5">
+    <div className="space-y-5 min-w-0">
       <div>
         <h1 className="font-display text-3xl font-bold text-primary">系统设置</h1>
         <p className="mt-1 text-sm text-ink/60">AI 服务监控、知识库管理、任务包导出。</p>
       </div>
 
-      <SubTabs tabs={TABS} defaultTab="ai">
+      <SubTabs tabs={TABS} activeTab={validTab} onTabChange={handleTabChange}>
         {(tab) => {
           switch (tab) {
             case "ai": return <AiSettings />;
@@ -94,7 +106,7 @@ function AiSettings() {
         <button onClick={handleTest} disabled={testing} className="rounded-xl border border-accent px-5 py-2.5 text-sm font-bold text-accent hover:bg-accent/5 disabled:opacity-50">
           {testing ? "测试中…" : "测试连接"}
         </button>
-        <a href="/grafana/" target="_blank" rel="noopener" className="rounded-xl border border-primary/15 px-5 py-2.5 text-sm font-bold text-primary hover:bg-surface/50">
+        <a href={GRAFANA_DASHBOARD_URL} target="_blank" rel="noopener" className="rounded-xl border border-primary/15 px-5 py-2.5 text-sm font-bold text-primary hover:bg-surface/50">
           打开监控面板
         </a>
       </div>

@@ -46,6 +46,13 @@ public class AuditRunController {
         return ResponseEntity.ok(result);
     }
 
+    @GetMapping("/recent")
+    public ResponseEntity<List<Map<String, Object>>> listRecentRuns(
+        @RequestParam(defaultValue = "20") int limit
+    ) {
+        return ResponseEntity.ok(agentRunService.listRecentRuns(limit));
+    }
+
     @GetMapping("/{traceId}")
     public ResponseEntity<AgentRunResult> getRunByTraceId(@PathVariable String traceId) {
         var result = agentRunService.getRunByTraceId(traceId);

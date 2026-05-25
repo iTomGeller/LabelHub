@@ -68,13 +68,13 @@ export function KnowledgeBasePanel() {
   }
 
   return (
-    <div className="space-y-5">
-      <div className="flex items-center justify-between">
-        <div>
+    <div className="space-y-5 min-w-0">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between min-w-0">
+        <div className="min-w-0">
           <h3 className="text-lg font-bold text-primary">知识库管理</h3>
           <p className="text-xs text-ink/50">上传标注规范、业务词表、质量规则等文档，AI 审核时动态召回相关知识</p>
         </div>
-        <button onClick={() => setShowUpload(!showUpload)} className="rounded-xl bg-accent px-4 py-2 text-sm font-bold text-white hover:bg-accent/90">
+        <button onClick={() => setShowUpload(!showUpload)} className="shrink-0 self-start rounded-xl bg-accent px-4 py-2 text-sm font-bold text-white hover:bg-accent/90">
           {showUpload ? "取消" : "上传文档"}
         </button>
       </div>

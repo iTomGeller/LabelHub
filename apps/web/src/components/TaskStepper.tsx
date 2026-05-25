@@ -193,28 +193,34 @@ const COMPONENT_PRESETS: SchemaComponent[] = [
   { id: "", type: "fileUpload", label: "截图上传", dataPath: "$.annotation.files", required: false, props: { accept: ["image/png", "image/jpeg"], maxFiles: 3 }, validation: [] },
 ];
 
+import { AuditBusinessDag, type BusinessNode } from "./AuditBusinessDag";
+
 type DagResultType = { pipelineId: string; stages: { stage: string; status: string; durationMs: number; output: Record<string, unknown>; summary: string }[]; allPassed: boolean };
 
-async function computeStableHash(config: TaskConfig): Promise<string> {
+type AuditCachePayload = {
+  hash: string;
+  configHash?: string;
+  traceId?: string;
+  businessNodes?: BusinessNode[];
+  result: DagResultType;
+};
+
+async function computeBackendConfigHash(config: TaskConfig): Promise<string> {
   const canonical = JSON.stringify({
-    taskName: config.taskName,
-    instruction: config.instruction,
-    sampleData: config.sampleData,
-    schemaComponents: config.schemaComponents,
-    rubricRules: config.rubricRules,
-    rubricDimensions: config.rubricDimensions,
+    taskName: config.taskName || "",
+    instruction: config.instruction || "",
+    sampleDataCount: config.sampleData.length,
+    schemaCount: config.schemaComponents.length,
+    rubricCount: config.rubricRules.length,
+    dimensionCount: config.rubricDimensions.length,
   });
   const encoder = new TextEncoder();
-  const data = encoder.encode(canonical);
-  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
-  return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, "0")).join("");
+  const hashBuffer = await crypto.subtle.digest("SHA-256", encoder.encode(canonical));
+  const hex = Array.from(new Uint8Array(hashBuffer)).map((b) => b.toString(16).padStart(2, "0")).join("");
+  return hex.substring(0, 16);
 }
 
-function getConfigHash(config: TaskConfig): string {
-  return `${config.taskName}|${config.instruction.slice(0, 50)}|${config.sampleData.length}|${config.schemaComponents.length}|${config.rubricRules.length}|${config.rubricDimensions.length}`;
-}
-
-function loadAuditCache(taskId: string): { hash: string; result: DagResultType } | null {
+function loadAuditCache(taskId: string): AuditCachePayload | null {
   try {
     const raw = localStorage.getItem(`labelhub_audit_run_${taskId}`);
     if (!raw) return null;
@@ -222,9 +228,9 @@ function loadAuditCache(taskId: string): { hash: string; result: DagResultType }
   } catch { return null; }
 }
 
-function saveAuditCache(taskId: string, hash: string, result: DagResultType) {
+function saveAuditCache(taskId: string, payload: AuditCachePayload) {
   try {
-    localStorage.setItem(`labelhub_audit_run_${taskId}`, JSON.stringify({ hash, result }));
+    localStorage.setItem(`labelhub_audit_run_${taskId}`, JSON.stringify(payload));
   } catch { /* quota exceeded */ }
 }
 
@@ -237,7 +243,7 @@ export function TaskStepper({ taskId, initialStep }: { taskId?: string; initialS
   const [published, setPublished] = useState(false);
   const [dagPassed, setDagPassed] = useState(false);
   const [dagReport, setDagReport] = useState<{ pipelineId: string; allPassed: boolean; totalMs: number; stages: { stage: string; status: string; durationMs: number; summary: string }[] } | null>(null);
-  const [dagCache, setDagCache] = useState<{ hash: string; result: DagResultType } | null>(() => loadAuditCache(config.taskId));
+  const [dagCache, setDagCache] = useState<AuditCachePayload | null>(() => loadAuditCache(config.taskId));
   const currentIdx = STEPS.findIndex((s) => s.key === step);
 
   function goNext() {
@@ -379,7 +385,33 @@ export function TaskStepper({ taskId, initialStep }: { taskId?: string; initialS
       {step === "upload" && <StepUpload config={config} setConfig={setConfig} onAiGenerate={handleAiGenerate} loading={loading} />}
       {step === "template" && <StepTemplate config={config} setConfig={setConfig} />}
       {step === "rules" && <StepRules config={config} setConfig={setConfig} />}
-      {step === "publish" && <StepPublish config={config} allPassed={allPassed} checks={checks} dagCache={dagCache} onDagResult={(passed, report) => { setDagPassed(passed); if (report) setDagReport(report); const hash = getConfigHash(config); const cacheEntry = { hash, result: { pipelineId: report?.pipelineId || "", stages: (report?.stages || []).map(s => ({ ...s, output: {} })), allPassed: passed } }; setDagCache(cacheEntry); saveAuditCache(config.taskId, hash, cacheEntry.result); }} />}
+      {step === "publish" && (
+        <StepPublish
+          config={config}
+          allPassed={allPassed}
+          checks={checks}
+          dagCache={dagCache}
+          onJumpToStep={(s) => jumpTo(s as StepKey)}
+          onDagResult={async (passed, report, extras) => {
+            setDagPassed(passed);
+            if (report) setDagReport(report);
+            const hash = extras?.configHash || (await computeBackendConfigHash(config));
+            const cacheEntry: AuditCachePayload = {
+              hash,
+              configHash: extras?.configHash || hash,
+              traceId: extras?.traceId,
+              businessNodes: extras?.businessNodes,
+              result: {
+                pipelineId: report?.pipelineId || extras?.traceId || "",
+                stages: (report?.stages || []).map(s => ({ ...s, output: {} })),
+                allPassed: passed,
+              },
+            };
+            setDagCache(cacheEntry);
+            saveAuditCache(config.taskId, cacheEntry);
+          }}
+        />
+      )}
 
       <div className="flex items-center justify-between">
         <button onClick={goPrev} disabled={currentIdx === 0} className={`rounded-xl border border-primary/20 px-5 py-2.5 text-sm font-bold ${currentIdx === 0 ? "cursor-not-allowed text-ink/30" : "text-primary hover:border-accent"}`}>上一步</button>
@@ -1114,18 +1146,35 @@ const AUDIT_LABELS: Record<string, string> = {
   task_package_writer: "发布准备",
 };
 
-function StepPublish({ config, allPassed, checks, onDagResult, dagCache }: { config: TaskConfig; allPassed: boolean; checks: { label: string; ok: boolean; step?: StepKey; hint?: string }[]; onDagResult: (passed: boolean, report?: { pipelineId: string; allPassed: boolean; totalMs: number; stages: { stage: string; status: string; durationMs: number; summary: string }[] }) => void; dagCache: { hash: string; result: DagResultType } | null }) {
+function StepPublish({
+  config,
+  allPassed,
+  checks,
+  onDagResult,
+  dagCache,
+  onJumpToStep,
+}: {
+  config: TaskConfig;
+  allPassed: boolean;
+  checks: { label: string; ok: boolean; step?: StepKey; hint?: string }[];
+  onDagResult: (
+    passed: boolean,
+    report?: { pipelineId: string; allPassed: boolean; totalMs: number; stages: { stage: string; status: string; durationMs: number; summary: string }[] },
+    extras?: { traceId?: string; configHash?: string; businessNodes?: BusinessNode[] }
+  ) => void;
+  dagCache: AuditCachePayload | null;
+  onJumpToStep: (step: string) => void;
+}) {
   const [dagLoading, setDagLoading] = useState(false);
   const [dagResult, setDagResult] = useState<DagResultType | null>(dagCache?.result || null);
   const [dagHash, setDagHash] = useState<string>(dagCache?.hash || "");
   const [copied, setCopied] = useState(false);
-  const [businessNodes, setBusinessNodes] = useState<{ id: string; nodeKey: string; title: string; status: string; summary: string; evidence: string; impact: string; suggestion: string; referenceSources: string[]; fixStep: string; durationMs: number }[]>([]);
+  const [businessNodes, setBusinessNodes] = useState<BusinessNode[]>(dagCache?.businessNodes || []);
   const [traceNodes, setTraceNodes] = useState<{ id: string; type: string; title: string; status: string; durationMs: number; rag?: Record<string, unknown>; skill?: Record<string, unknown> }[]>([]);
-  const [traceId, setTraceId] = useState<string>("");
+  const [traceId, setTraceId] = useState<string>(dagCache?.traceId || dagCache?.result?.pipelineId || "");
   const [fromCache, setFromCache] = useState(false);
   const [showDevTrace, setShowDevTrace] = useState(false);
-
-  const currentHash = getConfigHash(config);
+  const [currentHash, setCurrentHash] = useState("");
 
   async function runAuditCheck(forceRun = false) {
     setDagLoading(true);
@@ -1147,20 +1196,27 @@ function StepPublish({ config, allPassed, checks, onDagResult, dagCache }: { con
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
 
-      setBusinessNodes(data.businessDag || []);
+      const nodes: BusinessNode[] = data.businessDag || [];
+      setBusinessNodes(nodes);
       setTraceNodes(data.developerDag || []);
       setTraceId(data.traceId || "");
       setFromCache(data.fromCache === true);
 
       const ap = data.status === "success";
       const totalMs = data.durationMs || 0;
-      const stages = (data.businessDag || []).map((n: { nodeKey: string; status: string; durationMs: number; summary: string }) => ({
-        stage: n.nodeKey, status: n.status, durationMs: n.durationMs, summary: n.summary
+      const stages = nodes.map((n: BusinessNode) => ({
+        stage: n.nodeKey, status: n.status, durationMs: n.durationMs, summary: n.summary, output: {},
       }));
 
       setDagResult({ pipelineId: data.traceId, stages, allPassed: ap });
-      setDagHash(currentHash);
-      onDagResult(ap, { pipelineId: data.traceId, allPassed: ap, totalMs, stages });
+      const backendHash = data.configHash || currentHash;
+      setDagHash(backendHash);
+      setCurrentHash(backendHash);
+      onDagResult(ap, { pipelineId: data.traceId, allPassed: ap, totalMs, stages }, {
+        traceId: data.traceId,
+        configHash: data.configHash,
+        businessNodes: nodes,
+      });
     } catch (e) {
       alert("审核执行失败: " + (e instanceof Error ? e.message : ""));
       onDagResult(false);
@@ -1170,26 +1226,49 @@ function StepPublish({ config, allPassed, checks, onDagResult, dagCache }: { con
   }
 
   useEffect(() => {
-    const hash = getConfigHash(config);
-    if (dagCache && dagCache.hash === hash) {
-      setDagResult(dagCache.result);
-      setDagHash(hash);
-      setFromCache(true);
-      const totalMs = dagCache.result.stages?.reduce((s: number, x: { durationMs: number }) => s + x.durationMs, 0) || 0;
-      onDagResult(dagCache.result.allPassed === true, { pipelineId: dagCache.result.pipelineId, allPassed: dagCache.result.allPassed, totalMs, stages: dagCache.result.stages.map(s => ({ stage: s.stage, status: s.status, durationMs: s.durationMs, summary: s.summary })) });
-      return;
+    let cancelled = false;
+
+    async function initAudit() {
+      const hash = await computeBackendConfigHash(config);
+      if (cancelled) return;
+      setCurrentHash(hash);
+
+      const cacheHash = dagCache?.configHash || dagCache?.hash;
+      if (dagCache && cacheHash === hash) {
+        setDagResult(dagCache.result);
+        setDagHash(hash);
+        setFromCache(true);
+        if (dagCache.businessNodes?.length) setBusinessNodes(dagCache.businessNodes);
+        if (dagCache.traceId) setTraceId(dagCache.traceId);
+        const totalMs = dagCache.result.stages?.reduce((s: number, x: { durationMs: number }) => s + x.durationMs, 0) || 0;
+        onDagResult(dagCache.result.allPassed === true, {
+          pipelineId: dagCache.traceId || dagCache.result.pipelineId,
+          allPassed: dagCache.result.allPassed,
+          totalMs,
+          stages: dagCache.result.stages.map(s => ({ stage: s.stage, status: s.status, durationMs: s.durationMs, summary: s.summary })),
+        }, {
+          traceId: dagCache.traceId,
+          configHash: hash,
+          businessNodes: dagCache.businessNodes,
+        });
+        return;
+      }
+
+      if (!dagResult && !dagLoading && config.taskName.trim()) {
+        runAuditCheck(false);
+      }
     }
-    if (!dagResult && !dagLoading && config.taskName.trim()) {
-      runAuditCheck(false);
-    }
+
+    initAudit();
+    return () => { cancelled = true; };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const isCacheValid = dagHash === currentHash && dagResult !== null;
+  const isCacheValid = (dagHash === currentHash || dagCache?.configHash === currentHash) && dagResult !== null;
   const canPublish = allPassed && dagResult?.allPassed === true;
   const failedChecks = checks.filter(c => !c.ok);
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-5 min-w-0">
       {/* Actionable Validation Checklist */}
       <div className="rounded-2xl border border-primary/10 bg-white p-6">
         <div className="flex items-center justify-between mb-4">
@@ -1225,14 +1304,16 @@ function StepPublish({ config, allPassed, checks, onDagResult, dagCache }: { con
       </div>
 
       {/* AI Audit with Business DAG */}
-      <div className="rounded-2xl border border-primary/10 bg-white p-6">
-        {businessNodes.length > 0 ? (
-          <AuditBusinessDagInline
+      <div className="rounded-2xl border border-primary/10 bg-white p-6 min-w-0">
+        {(businessNodes.length > 0 || dagLoading) ? (
+          <AuditBusinessDag
             nodes={businessNodes}
             loading={dagLoading}
             fromCache={fromCache}
             isCacheValid={isCacheValid}
+            traceId={traceId}
             onForceRerun={() => runAuditCheck(true)}
+            onJumpToStep={onJumpToStep}
           />
         ) : (
           <div>
@@ -1316,68 +1397,6 @@ function StepPublish({ config, allPassed, checks, onDagResult, dagCache }: { con
           <p className="mt-1 text-xs text-ink/60">建议根据上方审核意见优化配置后重新审核，或确认无需修改后强制发布。</p>
         </div>
       )}
-    </div>
-  );
-}
-
-function AuditBusinessDagInline({ nodes, loading, fromCache, isCacheValid, onForceRerun }: { nodes: { id: string; nodeKey: string; title: string; status: string; summary: string; evidence: string; impact: string; suggestion: string; referenceSources: string[]; fixStep: string; durationMs: number }[]; loading: boolean; fromCache: boolean; isCacheValid: boolean; onForceRerun: () => void }) {
-  const [expandedNode, setExpandedNode] = useState<string | null>(null);
-  const passedCount = nodes.filter(n => n.status === "success").length;
-  const allPassed = nodes.length > 0 && passedCount === nodes.length;
-  const totalMs = nodes.reduce((s, n) => s + n.durationMs, 0);
-
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h3 className="text-lg font-bold text-primary">AI 质量审核</h3>
-          <p className="text-xs text-ink/50">基于知识库和规则对任务配置进行多维度评估</p>
-        </div>
-        <div className="flex items-center gap-2">
-          {fromCache && isCacheValid && <span className="text-[10px] text-success/70 bg-success/5 border border-success/10 rounded px-2 py-0.5">已使用上次审核结果</span>}
-          <button onClick={onForceRerun} disabled={loading} className={`rounded-xl px-4 py-2 text-sm font-bold transition ${loading ? "bg-accent/50 text-white cursor-wait" : "border border-accent/30 text-accent hover:bg-accent/5"}`}>
-            {loading ? "审核中…" : "手动重新审核"}
-          </button>
-        </div>
-      </div>
-
-      <div className="rounded-xl bg-surface/40 p-4 flex items-center gap-4">
-        <span className={`flex h-12 w-12 items-center justify-center rounded-full text-lg font-bold ${allPassed ? "bg-success/15 text-success" : "bg-warning/15 text-warning"}`}>
-          {passedCount}/{nodes.length}
-        </span>
-        <div>
-          <p className="text-sm font-bold text-primary">{allPassed ? "审核通过，可以安全发布" : "部分维度需要关注"}</p>
-          <p className="text-xs text-ink/40">共 {nodes.length} 项检查，{passedCount} 项合格，耗时 {(totalMs / 1000).toFixed(1)} 秒</p>
-        </div>
-      </div>
-
-      <div className="space-y-2">
-        {nodes.map((node, idx) => (
-          <div key={node.id}>
-            {idx > 0 && <div className="ml-4 h-1 w-px bg-primary/10" />}
-            <button onClick={() => setExpandedNode(expandedNode === node.id ? null : node.id)} className={`w-full text-left rounded-xl px-4 py-3 transition-all ${node.status === "success" ? "bg-success/5 hover:bg-success/10" : "bg-warning/5 border border-warning/15 hover:bg-warning/10"} ${expandedNode === node.id ? "ring-2 ring-accent/30" : ""}`}>
-              <div className="flex items-center gap-3">
-                <span className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold ${node.status === "success" ? "bg-success/15 text-success" : "bg-warning/15 text-warning"}`}>{node.status === "success" ? "\u2713" : "!"}</span>
-                <div className="flex-1 min-w-0">
-                  <span className="text-sm font-bold text-primary">{node.title}</span>
-                  <p className="text-xs text-ink/60 truncate">{node.summary}</p>
-                </div>
-                <span className={`text-xs font-bold shrink-0 ${node.status === "success" ? "text-success" : "text-warning"}`}>{node.status === "success" ? "通过" : "需关注"}</span>
-              </div>
-            </button>
-            {expandedNode === node.id && (
-              <div className="ml-10 mt-1 mb-2 rounded-xl border border-primary/10 bg-white p-4 space-y-2 shadow-sm">
-                {node.evidence && <div><p className="text-[10px] font-bold text-ink/40">参考依据</p><p className="text-xs text-ink/70">{node.evidence}</p></div>}
-                {node.impact && <div><p className="text-[10px] font-bold text-ink/40">影响</p><p className="text-xs text-warning">{node.impact}</p></div>}
-                {node.suggestion && <div><p className="text-[10px] font-bold text-ink/40">建议</p><p className="text-xs text-ink/70">{node.suggestion}</p></div>}
-                {node.referenceSources.length > 0 && node.referenceSources[0] !== "" && (
-                  <div className="flex flex-wrap gap-1">{node.referenceSources.map((src, i) => <span key={i} className="text-[10px] bg-accent/5 text-accent border border-accent/10 rounded px-2 py-0.5">{src}</span>)}</div>
-                )}
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
     </div>
   );
 }

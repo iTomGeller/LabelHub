@@ -50,17 +50,17 @@ export function TaskList() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
+    <div className="space-y-6 min-w-0">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between min-w-0">
+        <div className="min-w-0">
           <h1 className="font-display text-3xl font-bold text-primary">任务列表</h1>
           <p className="mt-1 text-sm text-ink/60">管理所有标注任务，点击查看详情或继续配置。</p>
         </div>
-        <a href="/?view=task" className="rounded-xl bg-accent px-5 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-accent/90">+ 新建任务</a>
+        <a href="/?view=task" className="shrink-0 self-start rounded-xl bg-accent px-5 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-accent/90">+ 新建任务</a>
       </div>
 
       {/* Filter Tabs */}
-      <div className="flex items-center gap-1 rounded-xl bg-white border border-primary/10 p-1">
+      <div className="flex flex-wrap items-center gap-1 rounded-xl bg-white border border-primary/10 p-1">
         {FILTERS.map(f => (
           <button key={f.key} onClick={() => setFilter(f.key)} className={`rounded-lg px-4 py-2 text-sm font-bold transition ${filter === f.key ? "bg-accent text-white shadow-sm" : "text-ink/50 hover:text-primary hover:bg-surface/60"}`}>
             {f.label}
@@ -76,9 +76,9 @@ export function TaskList() {
           <p className="text-sm text-ink/40">暂无{filter !== "all" ? statusLabels[filter as TaskStatus] : ""}任务</p>
         </div>
       ) : (
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 min-w-0">
           {filtered.map((task) => (
-            <a key={task.taskId} href={getTaskHref(task)} className="group rounded-2xl border border-primary/10 bg-white p-5 shadow-sm transition hover:border-accent/40 hover:shadow-md">
+            <a key={task.taskId} href={getTaskHref(task)} className="group min-w-0 rounded-2xl border border-primary/10 bg-white p-5 shadow-sm transition hover:border-accent/40 hover:shadow-md">
               <div className="flex items-start justify-between">
                 <h3 className="font-bold text-primary group-hover:text-accent">{task.title}</h3>
                 <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${statusColors[task.status]}`}>{statusLabels[task.status]}</span>

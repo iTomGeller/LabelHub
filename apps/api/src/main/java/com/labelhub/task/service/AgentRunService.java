@@ -71,12 +71,15 @@ public class AgentRunService {
         if (!request.forceRun()) {
             AgentRunResult cached = findCachedRun(request.taskId(), configHash);
             if (cached != null) {
+                agentMetrics.recordAuditCacheHit();
+                agentMetrics.recordAuditRun(cached.status(), true);
                 agentMetrics.recordPipelineStage("audit_cache_hit", 0);
                 log.info("Returning cached audit run for task={} hash={}", request.taskId(), configHash);
                 return cached;
             }
         }
 
+        agentMetrics.recordAuditCacheMiss();
         agentMetrics.recordPipelineStage("audit_cache_miss", 0);
         return executeFullRun(request, configHash);
     }
@@ -96,6 +99,37 @@ public class AgentRunService {
 
     public AgentRunResult findByTaskAndHash(String taskId, String configHash) {
         return findCachedRun(taskId, configHash);
+    }
+
+    public List<Map<String, Object>> listRecentRuns(int limit) {
+        int safeLimit = Math.min(Math.max(limit, 1), 50);
+        return jdbc.queryForList(
+            "SELECT trace_id, task_id, config_hash, status, from_cache, finished_at FROM agent_runs WHERE finished_at IS NOT NULL ORDER BY finished_at DESC LIMIT ?",
+            safeLimit
+        );
+    }
+
+    private void recordRagMetrics(String ragContext) {
+        if (ragContext == null || ragContext.isBlank()) {
+            agentMetrics.recordRagEmptyRecall();
+            agentMetrics.recordRagRetrieval("knowledge_base", "empty");
+        } else {
+            agentMetrics.recordRagRetrieval("knowledge_base", "hit");
+        }
+    }
+
+    private void recordSkillMetrics(String nodeKey, List<SkillRegistryService.SkillMeta> skills, List<SkillRegistryService.SkillFinding> findings) {
+        for (var skill : skills) {
+            agentMetrics.recordSkillSelected(skill.name(), nodeKey);
+        }
+        for (var finding : findings) {
+            String skillName = finding.skillName() != null ? finding.skillName() : "unknown";
+            agentMetrics.recordSkillFinding(skillName, finding.severity());
+        }
+    }
+
+    private void recordSandboxMetrics(SandboxExecutionService.SandboxResult result) {
+        agentMetrics.recordSandboxExecution(result.toolName(), result.status());
     }
 
     private AgentRunResult executeFullRun(AuditRequest request, String configHash) {
@@ -132,6 +166,9 @@ public class AgentRunService {
 
         businessNodes.add(new BusinessNode("bn_1", "task_description", "任务说明", instrStatus, instrSummary, instrEvidence, instrImpact, instrSuggestion, ragContext1.isEmpty() ? List.of() : List.of("标注规范"), "upload", node1Duration));
         traceNodes.add(buildTraceNode(traceId, "tn_1", "agent", "任务说明审核", instrStatus, node1Duration, ragContext1, instructionSkills, instrFindings));
+        recordRagMetrics(ragContext1);
+        recordSkillMetrics("task_context", instructionSkills, instrFindings);
+        agentMetrics.recordAuditNodeDuration("task_description", "agent", node1Duration);
 
         // Node 2: Sample Data Check
         nodeStart = System.currentTimeMillis();
@@ -145,6 +182,9 @@ public class AgentRunService {
 
         businessNodes.add(new BusinessNode("bn_2", "sample_data", "样例数据", dataStatus, dataSummary, ragContext2.isEmpty() ? "" : "参考数据规范", dataStatus.equals("warning") ? "数据不足可能影响 AI 生成质量" : "", dataResult.findings().isEmpty() ? "" : "补充更多样例或修复空字段", ragContext2.isEmpty() ? List.of() : List.of("数据规范"), "upload", node2Duration));
         traceNodes.add(buildTraceNode(traceId, "tn_2", "sandbox", "数据集校验", dataStatus, node2Duration, ragContext2, List.of(), List.of()));
+        recordRagMetrics(ragContext2);
+        recordSandboxMetrics(dataResult);
+        agentMetrics.recordAuditNodeDuration("sample_data", "sandbox", node2Duration);
 
         // Node 3: Schema Template Check
         nodeStart = System.currentTimeMillis();
@@ -165,6 +205,10 @@ public class AgentRunService {
 
         businessNodes.add(new BusinessNode("bn_3", "annotation_template", "标注模板", schemaStatus, schemaSummary, ragContext3.isEmpty() ? "" : "参考模板规范", schemaStatus.equals("warning") ? "模板不完整会导致标注员无法正确提交" : "", schemaFindings.isEmpty() ? "" : schemaFindings.get(0).suggestion(), ragContext3.isEmpty() ? List.of() : List.of("模板规范"), "template", node3Duration));
         traceNodes.add(buildTraceNode(traceId, "tn_3", "tool", "Schema 校验", schemaStatus, node3Duration, ragContext3, schemaSkills, schemaFindings));
+        recordRagMetrics(ragContext3);
+        recordSkillMetrics("schema_generator", schemaSkills, schemaFindings);
+        recordSandboxMetrics(schemaResult);
+        agentMetrics.recordAuditNodeDuration("annotation_template", "tool", node3Duration);
 
         // Node 4: Quality Rules Check
         nodeStart = System.currentTimeMillis();
@@ -178,6 +222,9 @@ public class AgentRunService {
 
         businessNodes.add(new BusinessNode("bn_4", "quality_rules", "质检规则", rubricStatus, rubricSummary, ragContext4.isEmpty() ? "" : "参考质检规范", rubricStatus.equals("warning") ? "缺少规则可能导致审核无标准" : "", rubricResult.findings().isEmpty() ? "" : "补充质检规则和评分维度", ragContext4.isEmpty() ? List.of() : List.of("质检规则"), "rules", node4Duration));
         traceNodes.add(buildTraceNode(traceId, "tn_4", "tool", "Rubric 校验", rubricStatus, node4Duration, ragContext4, List.of(), List.of()));
+        recordRagMetrics(ragContext4);
+        recordSandboxMetrics(rubricResult);
+        agentMetrics.recordAuditNodeDuration("quality_rules", "tool", node4Duration);
 
         // Node 5: Comprehensive Assessment
         nodeStart = System.currentTimeMillis();
@@ -194,6 +241,8 @@ public class AgentRunService {
 
         businessNodes.add(new BusinessNode("bn_5", "comprehensive_assessment", "综合评估", assessStatus, assessSummary, ragContext5.isEmpty() ? "" : "参考评分标准", hasAll ? "" : "不完整的配置可能影响标注质量和效率", issues.isEmpty() ? "" : "修复: " + String.join("、", issues), ragContext5.isEmpty() ? List.of() : List.of("项目要求"), "publish", node5Duration));
         traceNodes.add(buildTraceNode(traceId, "tn_5", "agent", "综合评估", assessStatus, node5Duration, ragContext5, List.of(), List.of()));
+        recordRagMetrics(ragContext5);
+        agentMetrics.recordAuditNodeDuration("comprehensive_assessment", "agent", node5Duration);
 
         // Node 6: Publish Readiness
         nodeStart = System.currentTimeMillis();
@@ -211,6 +260,12 @@ public class AgentRunService {
 
         businessNodes.add(new BusinessNode("bn_6", "publish_readiness", "发布准备", pkgStatus, pkgSummary, "", pkgStatus.equals("warning") ? "不完整的任务包无法被 B/C 模块正确消费" : "", pkgResult.findings().isEmpty() ? "" : pkgResult.findings().get(0), List.of(), "publish", node6Duration));
         traceNodes.add(buildTraceNode(traceId, "tn_6", "tool", "任务包校验", pkgStatus, node6Duration, "", List.of(), List.of()));
+        recordSandboxMetrics(pkgResult);
+        agentMetrics.recordAuditNodeDuration("publish_readiness", "tool", node6Duration);
+
+        for (var server : mcpGateway.listServers()) {
+            agentMetrics.recordMcpCall(server.name(), "probe", server.available() ? "available" : "unavailable");
+        }
 
         // Finalize
         long totalDuration = System.currentTimeMillis() - runStart;
@@ -229,6 +284,7 @@ public class AgentRunService {
             log.error("Failed to update agent_run: {}", e.getMessage());
         }
 
+        agentMetrics.recordAuditRun(overallStatus, false);
         agentMetrics.recordPipelineStage("audit_run_total", totalDuration);
         return new AgentRunResult(traceId, request.taskId(), configHash, overallStatus, false, businessNodes, traceNodes, totalDuration);
     }
