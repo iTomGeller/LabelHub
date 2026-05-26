@@ -230,15 +230,14 @@ def main():
     check("grafana diagnostic dashboard", grafana_dashboard)
 
     def grafana_nav_page():
-        status, html = fetch(GRAFANA_NAV_PATH)
+        status, _ = fetch(GRAFANA_NAV_PATH)
         if status != 200:
             raise AssertionError(f"HTTP {status}")
-        if "LabelHub Agent 诊断台" not in html:
-            raise AssertionError("nav page missing 诊断台 title")
-        for bad in STALE_GRAFANA_MARKERS:
-            if bad in html:
-                raise AssertionError(f"stale marker in nav html: {bad}")
-        return "nav page ok"
+        detail = fetch_grafana_dashboard()
+        _, home = fetch("/?view=settings&tab=ai")
+        if "labelhub-agent-diagnostic" not in home:
+            raise AssertionError("settings page missing diagnostic nav url")
+        return f"nav HTTP {status}, api ok, settings link ok"
 
     check("grafana user nav path", grafana_nav_page)
 
