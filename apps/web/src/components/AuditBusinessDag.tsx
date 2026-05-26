@@ -1,6 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import { CallReportPanel, CallSummaryChips } from "./CallReportPanel";
+import { DagCanvas, BUSINESS_DAG_LAYOUT, BUSINESS_DAG_EDGES } from "./DagCanvas";
+import { countCalls } from "@/lib/callReport";
 
 export interface BusinessNode {
   id: string;
@@ -43,14 +46,14 @@ const NODE_AGENT_LABELS: Record<string, string> = {
   publish_readiness: "task_package_writer",
 };
 
-const DAG_LAYOUT = [
-  { key: "task_description", step: "前置", row: 0 },
-  { key: "sample_data", step: "并行 1", row: 1 },
-  { key: "annotation_template", step: "并行 2", row: 1 },
-  { key: "quality_rules", step: "并行 3", row: 1 },
-  { key: "comprehensive_assessment", step: "汇聚", row: 2 },
-  { key: "publish_readiness", step: "终点", row: 2 },
-] as const;
+const STEP_LABELS: Record<string, string> = {
+  task_description: "前置",
+  sample_data: "并行 1",
+  annotation_template: "并行 2",
+  quality_rules: "并行 3",
+  comprehensive_assessment: "汇聚",
+  publish_readiness: "终点",
+};
 
 function statusColor(status: string) {
   return status === "success"
@@ -104,7 +107,6 @@ function NodeDrawer({
 }) {
   const colors = statusColor(node.status);
   const agent = String(node.details?.agent || NODE_AGENT_LABELS[node.nodeKey] || "unknown");
-  const ragStatus = String(node.details?.ragStatus || "unknown");
   const calls = node.details?.calls as Record<string, unknown> | undefined;
   const risk = node.details?.risk as Record<string, unknown> | undefined;
   const action = node.details?.action as Record<string, unknown> | undefined;
@@ -145,6 +147,8 @@ function NodeDrawer({
             </div>
           )}
 
+          <CallReportPanel calls={calls} />
+
           <section>
             <p className="text-xs font-bold text-ink/40 mb-2">检查对象</p>
             {renderStructuredList(node.details?.checkedItems, String(node.details?.checkedItems || node.summary))}
@@ -160,21 +164,6 @@ function NodeDrawer({
           <section>
             <p className="text-xs font-bold text-ink/40 mb-2">证据列表</p>
             {renderStructuredList(node.details?.evidenceItems, node.evidence || "无结构化证据")}
-          </section>
-
-          <section>
-            <p className="text-xs font-bold text-ink/40 mb-2">调用链 (RAG / Skill / Tool / Sandbox / MCP)</p>
-            <div className="grid grid-cols-2 gap-2 text-xs">
-              <div className={`rounded-lg p-2 ${ragStatus === "empty" ? "bg-warning/10 text-warning" : "bg-emerald-50 text-emerald-800"}`}>
-                RAG: {ragStatus === "empty" ? "空召回" : ragStatus === "hit" ? "命中" : ragStatus}
-              </div>
-              <div className="rounded-lg bg-orange-50 text-orange-800 p-2">Skills: {Number(node.details?.skillCount ?? 0)}</div>
-              <div className="rounded-lg bg-amber-50 text-amber-800 p-2">ToolCall: {Number(node.details?.toolCallCount ?? 0)}</div>
-              <div className="rounded-lg bg-cyan-50 text-cyan-800 p-2">MCP: {Number(node.details?.mcpCount ?? 0)}</div>
-            </div>
-            {calls && (
-              <pre className="mt-2 rounded-lg bg-surface/60 p-2 text-[10px] overflow-x-auto">{JSON.stringify(calls, null, 2)}</pre>
-            )}
           </section>
 
           {(risk?.reason || node.impact) && (
@@ -220,15 +209,19 @@ export function AuditBusinessDag({
   const allPassed = nodes.length > 0 && passedCount === nodes.length;
   const totalMs = nodes.reduce((s, n) => s + n.durationMs, 0);
   const ragEmptyCount = nodes.filter((n) => n.details?.ragStatus === "empty").length;
-
   const nodeMap = Object.fromEntries(nodes.map((n) => [n.nodeKey, n]));
 
-  function NodeCard({ nodeKey, stepStr }: { nodeKey: string; stepStr: string }) {
+  function NodeCard({ nodeKey }: { nodeKey: string }) {
     const node = nodeMap[nodeKey];
     if (!node) return null;
+    const layout = BUSINESS_DAG_LAYOUT.find((l) => l.id === nodeKey);
+    if (!layout) return null;
+
     const c = statusColor(node.status);
     const agent = String(node.details?.agent || NODE_AGENT_LABELS[node.nodeKey] || "");
     const evidenceCount = Array.isArray(node.details?.evidenceItems) ? node.details.evidenceItems.length : 0;
+    const calls = node.details?.calls as Record<string, unknown> | undefined;
+    const callCount = countCalls(calls).total;
     const actualMetric = Array.isArray(node.details?.actual)
       ? (node.details.actual as Record<string, unknown>[]).map((a) => String(a.value ?? a.label)).join(" · ")
       : String(node.details?.actual || node.summary);
@@ -238,13 +231,14 @@ export function AuditBusinessDag({
       <button
         type="button"
         onClick={() => setSelectedNode(node)}
-        className={`relative w-full min-w-[140px] max-w-[180px] rounded-xl border-2 p-3 text-left transition hover:shadow-md ${
+        className={`absolute w-[180px] rounded-xl border-2 p-3 text-left transition hover:shadow-md ${
           selectedNode?.id === node.id ? "border-accent ring-2 ring-accent/20" : "border-primary/10"
         } ${c.bg}`}
+        style={{ left: layout.x, top: layout.y }}
       >
         <div className="flex items-center gap-1.5 mb-2">
           <span className={`h-2 w-2 rounded-full shrink-0 ${c.dot}`} />
-          <span className="text-[10px] font-bold text-ink/40">{stepStr}</span>
+          <span className="text-[10px] font-bold text-ink/40">{STEP_LABELS[nodeKey]}</span>
         </div>
         <p className="text-xs font-bold text-primary leading-tight">{node.title}</p>
         {agent && <p className="text-[9px] font-mono text-ink/40 truncate">{agent}</p>}
@@ -252,7 +246,11 @@ export function AuditBusinessDag({
         <div className="mt-2 flex flex-wrap gap-1 text-[9px] text-ink/40">
           <span>{node.durationMs}ms</span>
           {evidenceCount > 0 && <span>· {evidenceCount} 证据</span>}
+          {callCount > 0 && <span>· {callCount} 调用</span>}
           {risk !== "low" && <span className={risk === "high" ? "text-warning" : "text-amber-600"}>· {risk === "high" ? "高风险" : "中风险"}</span>}
+        </div>
+        <div className="mt-2">
+          <CallSummaryChips calls={calls} />
         </div>
       </button>
     );
@@ -263,7 +261,7 @@ export function AuditBusinessDag({
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h3 className="text-lg font-bold text-primary">AI 质量审核</h3>
-          <p className="text-xs text-ink/50">分支汇聚 DAG — 点击节点查看结构化审核报告</p>
+          <p className="text-xs text-ink/50">分支汇聚 DAG — 点击节点查看结构化审核报告与 Tool/Skill 执行明细</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {fromCache && isCacheValid !== false && (
@@ -318,23 +316,14 @@ export function AuditBusinessDag({
           </div>
 
           <div className="overflow-x-auto pb-2">
-            <div className="flex flex-col gap-4 min-w-max lg:min-w-0 lg:max-w-none">
-              <div className="flex justify-center">
-                <NodeCard nodeKey="task_description" stepStr="前置" />
-              </div>
-              <div className="flex flex-wrap justify-center gap-3">
-                <NodeCard nodeKey="sample_data" stepStr="并行 1" />
-                <NodeCard nodeKey="annotation_template" stepStr="并行 2" />
-                <NodeCard nodeKey="quality_rules" stepStr="并行 3" />
-              </div>
-              <div className="flex flex-wrap justify-center gap-3">
-                <NodeCard nodeKey="comprehensive_assessment" stepStr="汇聚" />
-                <NodeCard nodeKey="publish_readiness" stepStr="终点" />
-              </div>
-            </div>
+            <DagCanvas width={800} height={440} nodes={BUSINESS_DAG_LAYOUT} edges={BUSINESS_DAG_EDGES}>
+              {BUSINESS_DAG_LAYOUT.map((layout) => (
+                <NodeCard key={layout.id} nodeKey={layout.id} />
+              ))}
+            </DagCanvas>
           </div>
 
-          <p className="text-[10px] text-ink/40 text-center">点击节点查看对象清单、规则、实际数据、证据与调用链</p>
+          <p className="text-[10px] text-ink/40 text-center">点击节点查看对象清单、规则、实际数据、证据与 Tool/Skill/Sandbox/MCP 执行结果</p>
         </div>
       )}
 

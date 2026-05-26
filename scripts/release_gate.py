@@ -56,16 +56,53 @@ def business_trace_match(business_dag, trace_id):
     return True
 
 
-def grafana_stale_panels():
-    path = ROOT / "deploy" / "grafana" / "dashboards" / "agent-rag-trace.json"
-    dash = json.loads(path.read_text(encoding="utf-8"))
-    text = json.dumps(dash, ensure_ascii=False)
+def validate_grafana_dashboard(dashboard_json):
+    text = json.dumps(dashboard_json, ensure_ascii=False)
     stale = 0
     if "RAG 命中率 (全 Agent)" in text:
         stale += 1
     if "1 - (sum(trace_persist_failed_total)" in text:
         stale += 1
-    return stale
+    if stale > 0:
+        return False, f"stale panels={stale}"
+
+    title = dashboard_json.get("title", "")
+    if title != "LabelHub Agent 诊断台":
+        return False, f"unexpected title={title!r}"
+
+    templating = dashboard_json.get("templating", {}).get("list", [])
+    var_names = {v.get("name") for v in templating}
+    if "agent" not in var_names:
+        return False, "missing agent template variable"
+
+    panel_text = json.dumps(dashboard_json.get("panels", []), ensure_ascii=False)
+    if "$agent" not in panel_text:
+        return False, "no panel query references $agent"
+
+    table_panels = [p for p in dashboard_json.get("panels", []) if p.get("type") == "table"]
+    if not table_panels:
+        return False, "missing Agent/Node table panel"
+
+    return True, f"title={title}, vars={sorted(var_names)}, table panels={len(table_panels)}"
+
+
+def grafana_dashboard_check():
+    try:
+        req = urllib.request.Request(
+            BASE + "/grafana/api/dashboards/uid/labelhub-agent-rag-trace",
+            method="GET",
+        )
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            payload = json.loads(resp.read().decode("utf-8", errors="replace"))
+        dashboard = payload.get("dashboard") or payload
+        return validate_grafana_dashboard(dashboard)
+    except Exception as online_error:
+        path = ROOT / "deploy" / "grafana" / "dashboards" / "agent-rag-trace.json"
+        dash = json.loads(path.read_text(encoding="utf-8"))
+        ok, detail = validate_grafana_dashboard(dash)
+        if ok:
+            return True, f"online unavailable ({online_error}); local ok: {detail}"
+        return False, detail
 
 
 def main():
@@ -149,8 +186,8 @@ def main():
     except Exception as e:
         record("prometheus metrics", False, str(e))
 
-    stale = grafana_stale_panels()
-    record("grafana stale panels", stale == 0, f"grafana stale panels={stale}")
+    ok, detail = grafana_dashboard_check()
+    record("grafana diagnostic dashboard", ok, detail)
 
     try:
         for path in ["/", "/?view=trace", "/?view=settings&tab=knowledge", "/?view=settings&tab=ai"]:

@@ -332,6 +332,13 @@ public class AgentRunService {
             null, ragInfo, skillInfo, mcpInfo, primarySandbox, List.of());
     }
 
+    private int countToolCalls(Map<String, Object> calls) {
+        int count = 0;
+        if (calls.get("tools") instanceof List<?> tools) count += tools.size();
+        if (calls.get("sandbox") instanceof List<?> sandbox) count += sandbox.size();
+        return count;
+    }
+
     private void recordExecutionMetrics(String agent, String nodeKey, String status, String taskId, String traceId) {
         agentMetrics.recordTraceNode(agent, nodeKey, status, taskId);
     }
@@ -398,7 +405,7 @@ public class AgentRunService {
             instrFindings.isEmpty() ? "继续观察" : "优化说明",
             instrFindings.isEmpty() ? "upload" : "upload",
             instrSuggestion,
-            ragStatus1, instructionSkills.size(), 0, 0
+            ragStatus1, instructionSkills.size(), countToolCalls(calls1), 0
         );
 
         businessNodes.add(new BusinessNode(traceId + "_bn_1", "task_description", "任务说明", instrStatus, instrSummary, instrEvidence, instrImpact, instrSuggestion, ragContext1.isEmpty() ? List.of() : List.of("标注规范"), "upload", node1Duration, instrDetails));
@@ -452,7 +459,7 @@ public class AgentRunService {
             dataResult.findings().isEmpty() ? "无需动作" : "补充样例",
             "upload",
             dataResult.findings().isEmpty() ? "" : "请返回 [数据上传] 步骤补充更多样例，或修复字段为空的数据",
-            ragStatus2, 0, 0, 0
+            ragStatus2, 0, countToolCalls(calls2), 0
         );
 
         businessNodes.add(new BusinessNode(traceId + "_bn_2", "sample_data", "样例数据", dataStatus, dataSummary, ragContext2.isEmpty() ? "通过配置校验器直接检查" : "参考数据规范", dataStatus.equals("warning") ? "数据不足可能影响 AI 生成质量" : "", dataResult.findings().isEmpty() ? "" : "补充更多样例或修复空字段", ragContext2.isEmpty() ? List.of() : List.of("数据规范"), "upload", node2Duration, dataDetails));
@@ -513,7 +520,7 @@ public class AgentRunService {
             schemaFindings.isEmpty() ? "无需动作" : "修复模板",
             "template",
             schemaFindings.isEmpty() ? "" : schemaFindings.get(0).suggestion(),
-            ragStatus3, schemaSkills.size(), 1, 0
+            ragStatus3, schemaSkills.size(), countToolCalls(calls3), 0
         );
 
         businessNodes.add(new BusinessNode(traceId + "_bn_3", "annotation_template", "标注模板", schemaStatus, schemaSummary, ragContext3.isEmpty() ? "基于通用组件规范" : "参考模板规范", schemaStatus.equals("warning") ? "模板不完整会导致标注员无法正确提交" : "", schemaFindings.isEmpty() ? "" : schemaFindings.get(0).suggestion(), ragContext3.isEmpty() ? List.of() : List.of("模板规范"), "template", node3Duration, schemaDetails));
@@ -568,7 +575,7 @@ public class AgentRunService {
             rubricResult.findings().isEmpty() ? "无需动作" : "补充规则",
             "rules",
             rubricResult.findings().isEmpty() ? "" : "返回 [质检规则] 步骤补充维度和规则描述",
-            ragStatus4, 0, 1, 0
+            ragStatus4, 0, countToolCalls(calls4), 0
         );
 
         businessNodes.add(new BusinessNode(traceId + "_bn_4", "quality_rules", "质检规则", rubricStatus, rubricSummary, ragContext4.isEmpty() ? "通用规则检查" : "参考质检规范", rubricStatus.equals("warning") ? "缺少规则可能导致审核无标准" : "", rubricResult.findings().isEmpty() ? "" : "补充质检规则和评分维度", ragContext4.isEmpty() ? List.of() : List.of("质检规则"), "rules", node4Duration, rubricDetails));
@@ -651,6 +658,8 @@ public class AgentRunService {
             mcpProbeResults.add(Map.of("server", server.name(), "status", mcpStatus));
         }
 
+        Map<String, Object> calls6 = buildCallsEnvelope(buildRagInfo("", 0), buildSkillInfo(List.of(), List.of()), List.of(sandboxToCall(pkgResult, "tool")), List.of(), mcpProbeResults);
+
         Map<String, Object> pkgDetails = buildStructuredDetails(
             agent6, "publish_readiness", traceId, pkgStatus,
             List.of(
@@ -670,13 +679,13 @@ public class AgentRunService {
                 pkgResult.findings().stream().map(f -> Map.<String, Object>of("type", "contract", "label", "finding", "value", f, "source", "package_check")),
                 mcpProbeResults.stream().map(m -> Map.<String, Object>of("type", "mcp_probe", "label", m.get("server"), "value", m.get("status"), "source", "mcp"))
             ).toList(),
-            buildCallsEnvelope(buildRagInfo("", 0), buildSkillInfo(List.of(), List.of()), List.of(sandboxToCall(pkgResult, "tool")), List.of(), mcpProbeResults),
+            calls6,
             pkgStatus.equals("warning") ? "high" : "low",
             pkgStatus.equals("warning") ? "下游 B/C 端解析报错，导致任务不可见" : "",
             pkgStatus.equals("warning") ? "重试或反馈" : "完成",
             "publish",
             pkgStatus.equals("warning") ? "通常是服务异常，请重试或反馈给技术" : "完成",
-            "n/a", 0, 1, mcpCount
+            "n/a", 0, countToolCalls(calls6), mcpCount
         );
 
         businessNodes.add(new BusinessNode(traceId + "_bn_6", "publish_readiness", "发布准备", pkgStatus, pkgSummary, "下游 API 契约协议", pkgStatus.equals("warning") ? "不完整的任务包无法被 B/C 模块正确消费" : "", pkgResult.findings().isEmpty() ? "" : pkgResult.findings().get(0), List.of(), "publish", node6Duration, pkgDetails));

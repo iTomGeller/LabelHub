@@ -60,6 +60,50 @@ def grafana_stale_panels(dashboard_json):
     return stale
 
 
+def validate_grafana_dashboard(dashboard_json):
+    stale = grafana_stale_panels(dashboard_json)
+    if stale > 0:
+        raise AssertionError(f"stale panels={stale}")
+
+    title = dashboard_json.get("title", "")
+    if title != "LabelHub Agent 诊断台":
+        raise AssertionError(f"unexpected title={title!r}")
+
+    templating = dashboard_json.get("templating", {}).get("list", [])
+    var_names = {v.get("name") for v in templating}
+    if "agent" not in var_names:
+        raise AssertionError("missing agent template variable")
+
+    panel_text = json.dumps(dashboard_json.get("panels", []), ensure_ascii=False)
+    if "$agent" not in panel_text:
+        raise AssertionError("no panel query references $agent")
+
+    table_panels = [p for p in dashboard_json.get("panels", []) if p.get("type") == "table"]
+    if not table_panels:
+        raise AssertionError("missing Agent/Node table panel")
+
+    return f"title={title}, vars={sorted(var_names)}, table panels={len(table_panels)}"
+
+
+def fetch_grafana_dashboard():
+    paths = [
+        "/grafana/api/dashboards/uid/labelhub-agent-rag-trace",
+        "http://127.0.0.1:3001/grafana/api/dashboards/uid/labelhub-agent-rag-trace",
+    ]
+    last_error = None
+    for path in paths:
+        try:
+            url = path if path.startswith("http") else BASE + path
+            req = urllib.request.Request(url, method="GET")
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                payload = json.loads(resp.read().decode("utf-8", errors="replace"))
+            dashboard = payload.get("dashboard") or payload
+            return validate_grafana_dashboard(dashboard)
+        except Exception as e:
+            last_error = e
+    raise last_error or AssertionError("unable to fetch grafana dashboard")
+
+
 def main():
     checks = []
     audit_data = {}
@@ -165,18 +209,17 @@ def main():
     check("prometheus metrics", metrics)
 
     def grafana_dashboard():
-        stale = 0
         try:
-            with open(GRAFANA_DASHBOARD_PATH, encoding="utf-8") as f:
-                dash = json.load(f)
-            stale = grafana_stale_panels(dash)
-        except FileNotFoundError:
-            with open("deploy/grafana/dashboards/agent-rag-trace.json", encoding="utf-8") as f:
-                dash = json.load(f)
-            stale = grafana_stale_panels(dash)
-        if stale > 0:
-            raise AssertionError(f"stale panels={stale}")
-        return f"grafana stale panels={stale}"
+            return fetch_grafana_dashboard()
+        except Exception as online_error:
+            try:
+                with open(GRAFANA_DASHBOARD_PATH, encoding="utf-8") as f:
+                    dash = json.load(f)
+            except FileNotFoundError:
+                with open("deploy/grafana/dashboards/agent-rag-trace.json", encoding="utf-8") as f:
+                    dash = json.load(f)
+            local = validate_grafana_dashboard(dash)
+            return f"online unavailable ({online_error}); local ok: {local}"
 
     check("grafana diagnostic dashboard", grafana_dashboard)
 
