@@ -194,6 +194,8 @@ const COMPONENT_PRESETS: SchemaComponent[] = [
 ];
 
 import { AuditBusinessDag, type BusinessNode } from "./AuditBusinessDag";
+import { AgentTraceDag } from "./AgentTraceDag";
+import type { TraceNode } from "@/lib/traceExecution";
 
 type DagResultType = { pipelineId: string; stages: { stage: string; status: string; durationMs: number; output: Record<string, unknown>; summary: string }[]; allPassed: boolean };
 
@@ -209,7 +211,7 @@ type AuditCachePayload = {
   result: DagResultType;
 };
 
-const AUDIT_CACHE_SCHEMA_VERSION = 2;
+const AUDIT_CACHE_SCHEMA_VERSION = 3;
 const AUDIT_DETAILS_VERSION = 2;
 
 function isValidAuditCache(cache: AuditCachePayload | null, configHash: string): boolean {
@@ -1197,10 +1199,9 @@ function StepPublish({
   const [dagHash, setDagHash] = useState<string>("");
   const [copied, setCopied] = useState(false);
   const [businessNodes, setBusinessNodes] = useState<BusinessNode[]>([]);
-  const [traceNodes, setTraceNodes] = useState<{ id: string; type: string; title: string; status: string; durationMs: number; rag?: Record<string, unknown>; skill?: Record<string, unknown> }[]>([]);
+  const [traceNodes, setTraceNodes] = useState<TraceNode[]>([]);
   const [traceId, setTraceId] = useState<string>("");
   const [fromCache, setFromCache] = useState(false);
-  const [showDevTrace, setShowDevTrace] = useState(false);
   const [currentHash, setCurrentHash] = useState("");
   const [cacheRejected, setCacheRejected] = useState(false);
 
@@ -1225,7 +1226,7 @@ function StepPublish({
   }, hash: string) {
     const nodes: BusinessNode[] = data.businessDag || [];
     setBusinessNodes(nodes);
-    setTraceNodes(data.developerDag || []);
+    setTraceNodes((data.developerDag || []) as TraceNode[]);
     setTraceId(data.traceId || "");
     setFromCache(data.fromCache === true);
 
@@ -1430,38 +1431,16 @@ function StepPublish({
         )}
       </div>
 
-      {/* Developer Trace Toggle */}
-      {traceNodes.length > 0 && (
-        <div className="rounded-2xl border border-primary/10 bg-white p-6">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h3 className="text-sm font-bold text-primary">开发者视图</h3>
-              <p className="text-[10px] text-ink/40 font-mono">traceId: {traceId}</p>
-            </div>
-            <button onClick={() => setShowDevTrace(!showDevTrace)} className="text-xs text-accent font-bold hover:underline">
-              {showDevTrace ? "收起" : "展开 Agent Trace"}
-            </button>
-          </div>
-          {showDevTrace && (
-            <div className="space-y-2">
-              {traceNodes.map(node => (
-                <div key={node.id} className="rounded-lg border border-primary/10 px-3 py-2 text-xs">
-                  <div className="flex items-center gap-2">
-                    <span className="bg-purple-50 text-purple-700 rounded px-1.5 py-0.5 text-[10px] font-mono">{node.type}</span>
-                    <span className="font-bold text-primary">{node.title}</span>
-                    <span className="ml-auto text-ink/30 font-mono">{node.durationMs}ms</span>
-                    <span className={`h-2 w-2 rounded-full ${node.status === "success" ? "bg-success" : "bg-warning"}`} />
-                  </div>
-                  {node.rag && Boolean((node.rag as Record<string, unknown>).hasContent) && (
-                    <p className="mt-1 text-[10px] text-emerald-600">RAG: 已召回知识</p>
-                  )}
-                  {node.skill && Boolean((node.skill as Record<string, unknown>).used) && (
-                    <p className="mt-1 text-[10px] text-orange-600">Skills: {((node.skill as Record<string, unknown>).skills as string[] || []).join(", ")}</p>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
+      {/* 开发者 Trace 工作台 */}
+      {traceNodes.length > 0 && traceId && (
+        <div className="rounded-2xl border border-primary/10 bg-white p-6 min-w-0">
+          <AgentTraceDag
+            nodes={traceNodes}
+            traceId={traceId}
+            runStatus={dagResult?.allPassed ? "success" : "warning"}
+            traceCompleteness
+            compact
+          />
         </div>
       )}
 

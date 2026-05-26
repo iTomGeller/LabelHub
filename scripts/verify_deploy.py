@@ -8,6 +8,11 @@ if hasattr(sys.stdout, "buffer"):
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
 BASE = "http://8.146.231.216"
+STALE_GRAFANA_MARKERS = [
+    "LabelHub Agent 级监控",
+    "RAG 命中率 (全 Agent)",
+]
+GRAFANA_NAV_PATH = "/grafana/d/labelhub-agent-rag-trace/labelhub-agent-diagnostic?orgId=1&from=now-6h&to=now"
 GRAFANA_DASHBOARD_PATH = "/etc/grafana/provisioning/dashboards/agent-rag-trace.json"
 
 
@@ -51,8 +56,9 @@ def business_trace_match(business_dag, trace_id):
 def grafana_stale_panels(dashboard_json):
     stale = 0
     text = json.dumps(dashboard_json, ensure_ascii=False)
-    if "RAG 命中率 (全 Agent)" in text:
-        stale += 1
+    for bad in STALE_GRAFANA_MARKERS:
+        if bad in text:
+            stale += 1
     if "trace_persist_failed_total / audit_run_total" in text:
         stale += 1
     if "1 - (sum(trace_persist_failed_total)" in text:
@@ -222,6 +228,36 @@ def main():
             return f"online unavailable ({online_error}); local ok: {local}"
 
     check("grafana diagnostic dashboard", grafana_dashboard)
+
+    def grafana_nav_page():
+        status, html = fetch(GRAFANA_NAV_PATH)
+        if status != 200:
+            raise AssertionError(f"HTTP {status}")
+        if "LabelHub Agent 诊断台" not in html:
+            raise AssertionError("nav page missing 诊断台 title")
+        for bad in STALE_GRAFANA_MARKERS:
+            if bad in html:
+                raise AssertionError(f"stale marker in nav html: {bad}")
+        return "nav page ok"
+
+    check("grafana user nav path", grafana_nav_page)
+
+    def audit_tool_names():
+        biz = audit_data.get("businessDag") or []
+        tools = set()
+        for node in biz:
+            calls = (node.get("details") or {}).get("calls") or {}
+            for t in calls.get("tools") or []:
+                if isinstance(t, dict) and t.get("tool"):
+                    tools.add(t["tool"])
+            for s in calls.get("sandbox") or []:
+                if isinstance(s, dict) and s.get("tool"):
+                    tools.add(s["tool"])
+        if not tools:
+            raise AssertionError("no structured tool names")
+        return f"tools={sorted(tools)[:5]}"
+
+    check("audit tool call names", audit_tool_names)
 
     print(f"\nSummary: {sum(checks)}/{len(checks)} checks passed")
     sys.exit(0 if all(checks) else 1)

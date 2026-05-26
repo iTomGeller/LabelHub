@@ -1,23 +1,42 @@
 "use client";
 
 import { flattenCalls, callKindLabel, callStatusTone, type CallRecord } from "@/lib/callReport";
+import { nodeConclusion } from "@/lib/callReport";
 
-function CallRow({ row }: { row: CallRecord }) {
+function CallTable({ rows }: { rows: CallRecord[] }) {
   return (
-    <div className="rounded-lg border border-primary/10 bg-white p-3 text-xs space-y-2">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="rounded border border-primary/10 bg-surface px-2 py-0.5 font-bold text-primary">{callKindLabel(row.kind)}</span>
-        <span className="font-mono text-primary">{row.name}</span>
-        <span className={`rounded border px-2 py-0.5 font-bold ${callStatusTone(row.status)}`}>{row.status}</span>
-        {row.durationMs != null && <span className="text-ink/40">{row.durationMs}ms</span>}
-        {row.exitCode != null && <span className="text-ink/40">exit {row.exitCode}</span>}
-      </div>
-      {row.detail && <p className="text-ink/70">{row.detail}</p>}
-      {Array.isArray(row.findings) && row.findings.length > 0 && (
-        <ul className="list-disc list-inside text-ink/70 space-y-1">
-          {row.findings.map((f, i) => <li key={i}>{String(f)}</li>)}
-        </ul>
-      )}
+    <div className="overflow-x-auto rounded-xl border border-primary/10">
+      <table className="w-full text-xs">
+        <thead>
+          <tr className="bg-surface/60 text-left text-ink/50">
+            <th className="px-3 py-2 font-bold">类型</th>
+            <th className="px-3 py-2 font-bold">名称</th>
+            <th className="px-3 py-2 font-bold">结果</th>
+            <th className="px-3 py-2 font-bold">耗时</th>
+            <th className="px-3 py-2 font-bold">退出码</th>
+            <th className="px-3 py-2 font-bold">结论</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, i) => (
+            <tr key={`${row.kind}-${row.name}-${i}`} className="border-t border-primary/5">
+              <td className="px-3 py-2 font-bold text-primary">{callKindLabel(row.kind)}</td>
+              <td className="px-3 py-2">
+                <span className="font-bold text-primary">{row.nameZh}</span>
+                {row.name !== row.nameZh && (
+                  <span className="block text-[10px] text-ink/30 font-mono truncate max-w-[140px]" title={row.name}>{row.name}</span>
+                )}
+              </td>
+              <td className="px-3 py-2">
+                <span className={`rounded border px-1.5 py-0.5 font-bold ${callStatusTone(row.status)}`}>{row.statusZh}</span>
+              </td>
+              <td className="px-3 py-2 text-ink/50">{row.durationMs != null ? `${row.durationMs}ms` : "—"}</td>
+              <td className="px-3 py-2 text-ink/50">{row.exitCode != null ? row.exitCode : "—"}</td>
+              <td className="px-3 py-2 text-ink/70 max-w-[200px]">{row.conclusion || "—"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -28,17 +47,14 @@ export function CallReportPanel({ calls, title = "执行调用明细" }: { calls
     return (
       <section>
         <p className="text-xs font-bold text-ink/40 mb-2">{title}</p>
-        <p className="text-sm text-ink/40">本节点无 RAG / Skill / Tool / Sandbox / MCP 调用记录</p>
+        <p className="text-sm text-ink/40 rounded-lg bg-surface/50 px-3 py-2">本节点无额外调用记录（或未触发知识库/工具/技能/MCP）</p>
       </section>
     );
   }
-
   return (
     <section>
       <p className="text-xs font-bold text-ink/40 mb-2">{title}</p>
-      <div className="space-y-2">
-        {rows.map((row, i) => <CallRow key={`${row.kind}-${row.name}-${i}`} row={row} />)}
-      </div>
+      <CallTable rows={rows} />
     </section>
   );
 }
@@ -48,12 +64,14 @@ export function CallSummaryChips({ calls }: { calls?: Record<string, unknown> })
   if (rows.length === 0) return <span className="text-[9px] text-ink/40">无调用</span>;
   return (
     <div className="flex flex-wrap gap-1">
-      {rows.slice(0, 4).map((row, i) => (
-        <span key={`${row.kind}-${i}`} className={`rounded border px-1.5 py-0.5 text-[9px] font-bold ${callStatusTone(row.status)}`}>
-          {callKindLabel(row.kind)} · {row.name}
+      {rows.slice(0, 3).map((row, i) => (
+        <span key={`${row.kind}-${i}`} className={`rounded border px-1.5 py-0.5 text-[9px] font-bold ${callStatusTone(row.status)}`} title={row.name}>
+          {callKindLabel(row.kind)} · {row.nameZh}
         </span>
       ))}
-      {rows.length > 4 && <span className="text-[9px] text-ink/40">+{rows.length - 4}</span>}
+      {rows.length > 3 && <span className="text-[9px] text-ink/40">+{rows.length - 3}</span>}
     </div>
   );
 }
+
+export { nodeConclusion } from "@/lib/callReport";

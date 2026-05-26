@@ -1,11 +1,15 @@
+import { toolLabel, statusLabelZh } from "./diagnosticLabels";
+
 export interface CallRecord {
   kind: "rag" | "skill" | "tool" | "sandbox" | "mcp";
   name: string;
+  nameZh: string;
   status: string;
+  statusZh: string;
   durationMs?: number;
   exitCode?: number;
   findings?: unknown[];
-  detail?: string;
+  conclusion?: string;
   meta?: Record<string, unknown>;
 }
 
@@ -25,12 +29,15 @@ export function flattenCalls(calls?: Record<string, unknown>): CallRecord[] {
 
   const rag = calls.rag as Record<string, unknown> | undefined;
   if (rag) {
+    const hit = Boolean(rag.hasContent);
     rows.push({
       kind: "rag",
       name: String(rag.source || "knowledge_base"),
-      status: rag.hasContent ? "hit" : "empty",
+      nameZh: "知识库检索",
+      status: hit ? "hit" : "empty",
+      statusZh: hit ? "命中" : "空召回",
       durationMs: Number(rag.durationMs || 0),
-      detail: rag.hasContent ? `${String(rag.charCount || 0)} 字召回` : "知识库未命中",
+      conclusion: hit ? `召回 ${String(rag.charCount || 0)} 字` : "知识库未命中，使用静态规则",
       meta: rag,
     });
   }
@@ -39,48 +46,65 @@ export function flattenCalls(calls?: Record<string, unknown>): CallRecord[] {
   if (skills?.used) {
     const skillNames = (skills.skills as string[]) || [];
     const findings = (skills.findings as string[]) || [];
+    const fc = Number(skills.findingCount || findings.length || 0);
     rows.push({
       kind: "skill",
       name: skillNames.join(", ") || "skills",
-      status: Number(skills.findingCount || 0) > 0 ? "findings" : "success",
-      detail: `${skillNames.length} skills · ${Number(skills.findingCount || 0)} findings`,
+      nameZh: skillNames.map(toolLabel).join("、") || "技能调用",
+      status: fc > 0 ? "findings" : "success",
+      statusZh: fc > 0 ? `${fc} 条发现` : "成功",
+      conclusion: fc > 0 ? findings.slice(0, 2).map(String).join("；") : "无额外发现",
       findings,
       meta: skills,
     });
   }
 
   for (const t of (calls.tools as Record<string, unknown>[] | undefined) || []) {
+    const name = String(t.tool || "tool");
+    const st = String(t.status || "success");
+    const findings = Array.isArray(t.findings) ? t.findings : [];
     rows.push({
       kind: "tool",
-      name: String(t.tool || "tool"),
-      status: String(t.status || "?"),
+      name,
+      nameZh: toolLabel(name),
+      status: st,
+      statusZh: statusLabelZh(st),
       durationMs: Number(t.durationMs || 0),
       exitCode: Number(t.exitCode ?? 0),
-      findings: Array.isArray(t.findings) ? t.findings : [],
-      detail: `exit ${String(t.exitCode ?? "?")}`,
+      findings,
+      conclusion: findings.length > 0 ? findings.slice(0, 2).map(String).join("；") : `退出码 ${String(t.exitCode ?? 0)}`,
       meta: t,
     });
   }
 
   for (const s of (calls.sandbox as Record<string, unknown>[] | undefined) || []) {
+    const name = String(s.tool || "sandbox");
+    const st = String(s.status || "success");
+    const findings = Array.isArray(s.findings) ? s.findings : [];
     rows.push({
       kind: "sandbox",
-      name: String(s.tool || "sandbox"),
-      status: String(s.status || "?"),
+      name,
+      nameZh: toolLabel(name),
+      status: st,
+      statusZh: statusLabelZh(st),
       durationMs: Number(s.durationMs || 0),
       exitCode: Number(s.exitCode ?? 0),
-      findings: Array.isArray(s.findings) ? s.findings : [],
-      detail: `exit ${String(s.exitCode ?? "?")}`,
+      findings,
+      conclusion: findings.length > 0 ? findings.slice(0, 2).map(String).join("；") : `沙箱退出码 ${String(s.exitCode ?? 0)}`,
       meta: s,
     });
   }
 
   for (const m of (calls.mcp as Record<string, unknown>[] | undefined) || []) {
+    const name = String(m.server || m.tool || "mcp");
+    const st = String(m.status || "?");
     rows.push({
       kind: "mcp",
-      name: String(m.server || m.tool || "mcp"),
-      status: String(m.status || "?"),
-      detail: String(m.tool || "probe"),
+      name,
+      nameZh: toolLabel(name),
+      status: st,
+      statusZh: statusLabelZh(st),
+      conclusion: st === "unavailable" ? "MCP 服务未配置或不可达" : "探测通过",
       meta: m,
     });
   }
@@ -90,10 +114,10 @@ export function flattenCalls(calls?: Record<string, unknown>): CallRecord[] {
 
 export function callKindLabel(kind: CallRecord["kind"]) {
   switch (kind) {
-    case "rag": return "RAG";
-    case "skill": return "Skill";
-    case "tool": return "Tool";
-    case "sandbox": return "Sandbox";
+    case "rag": return "知识库";
+    case "skill": return "技能";
+    case "tool": return "工具";
+    case "sandbox": return "沙箱";
     case "mcp": return "MCP";
   }
 }
@@ -102,4 +126,10 @@ export function callStatusTone(status: string) {
   if (["success", "hit", "available"].includes(status)) return "text-success bg-success/10 border-success/20";
   if (["empty", "findings", "warning"].includes(status)) return "text-warning bg-warning/10 border-warning/20";
   return "text-danger bg-danger/10 border-danger/20";
+}
+
+export function nodeConclusion(status: string, summary: string, ragEmpty?: boolean) {
+  if (status !== "success") return `需关注：${summary}`;
+  if (ragEmpty) return `已通过，但知识库空召回，置信度偏低`;
+  return `通过：${summary}`;
 }

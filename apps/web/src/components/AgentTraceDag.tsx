@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   groupTraceNodes,
   groupHasRisk,
@@ -9,32 +9,42 @@ import {
   type TraceNode,
 } from "@/lib/traceExecution";
 import { CallReportPanel, CallSummaryChips } from "./CallReportPanel";
-import { DagCanvas, BUSINESS_DAG_LAYOUT, BUSINESS_DAG_EDGES } from "./DagCanvas";
+import { DagCanvas, useNarrowScreen } from "./DagCanvas";
+import {
+  BUSINESS_DAG_EDGES,
+  BUSINESS_DAG_LANE_LABELS,
+  computeBusinessDagLayout,
+  computeVerticalDagLayout,
+  DEFAULT_NODE_H,
+  DEFAULT_NODE_W,
+} from "@/lib/dagLayout";
+import { agentLabel, statusLabelZh } from "@/lib/diagnosticLabels";
 
 interface Props {
   nodes: TraceNode[];
   traceId: string;
   runStatus?: string;
   traceCompleteness?: boolean;
+  compact?: boolean;
 }
 
 const FILTER_OPTIONS = [
   { key: "all", label: "全部" },
   { key: "risk", label: "有风险" },
-  { key: "rag_empty", label: "RAG 空召回" },
-  { key: "tool_error", label: "Tool 异常" },
+  { key: "rag_empty", label: "空召回" },
+  { key: "tool_error", label: "工具异常" },
   { key: "mcp_error", label: "MCP 异常" },
-  { key: "skill_findings", label: "Skill findings" },
+  { key: "skill_findings", label: "技能发现" },
 ] as const;
 
-const NODE_KEY_TO_LAYOUT: Record<string, string> = {
-  task_description: "task_description",
-  sample_data: "sample_data",
-  annotation_template: "annotation_template",
-  quality_rules: "quality_rules",
-  comprehensive_assessment: "comprehensive_assessment",
-  publish_readiness: "publish_readiness",
-};
+const DAG_ORDER = [
+  "task_description",
+  "sample_data",
+  "annotation_template",
+  "quality_rules",
+  "comprehensive_assessment",
+  "publish_readiness",
+];
 
 function statusBadge(status: string) {
   if (status === "success") return "bg-success/10 text-success border-success/20";
@@ -43,24 +53,17 @@ function statusBadge(status: string) {
 }
 
 function emptyStateMessage(runStatus?: string, traceCompleteness?: boolean, groupCount?: number) {
-  if (runStatus === "running") {
-    return { title: "审核仍在运行", detail: "Agent 执行组将在审核完成后写入，请稍后刷新。" };
-  }
-  if (groupCount === 0 && runStatus === "partial") {
-    return { title: "Trace 保存失败", detail: "运行时产生了结果但数据库持久化失败，请重新执行审核。" };
-  }
-  if (groupCount === 0) {
-    return { title: "Trace 执行组为空", detail: "未找到 Agent 执行组，可能是旧版数据或持久化异常。" };
-  }
-  if (traceCompleteness === false) {
-    return { title: "Trace 不完整", detail: "部分 Agent 执行组缺失，请查看上方完整性提示。" };
-  }
-  return { title: "暂无匹配执行组", detail: "当前筛选条件下没有可展示的 Agent 执行组。" };
+  if (runStatus === "running") return { title: "审核仍在运行", detail: "完成后将写入 Trace。" };
+  if (groupCount === 0 && runStatus === "partial") return { title: "Trace 保存失败", detail: "请重新执行审核。" };
+  if (groupCount === 0) return { title: "Trace 为空", detail: "可能是旧版数据或持久化异常。" };
+  if (traceCompleteness === false) return { title: "Trace 不完整", detail: "部分 Agent 缺失。" };
+  return { title: "暂无匹配节点", detail: "调整筛选条件后重试。" };
 }
 
-export function AgentTraceDag({ nodes, traceId, runStatus, traceCompleteness }: Props) {
+export function AgentTraceDag({ nodes, traceId, runStatus, traceCompleteness, compact }: Props) {
   const [expandedGroup, setExpandedGroup] = useState<string | null>(null);
   const [filter, setFilter] = useState<string>("all");
+  const narrow = useNarrowScreen();
 
   const groups = groupTraceNodes(nodes);
   const visibleGroups = groups.filter((g) => groupMatchesFilter(g, filter));
@@ -71,19 +74,26 @@ export function AgentTraceDag({ nodes, traceId, runStatus, traceCompleteness }: 
   const ragEmptyCount = groups.filter((g) => groupMatchesFilter(g, "rag_empty")).length;
   const expanded = groups.find((g) => g.traceNodeId === expandedGroup) || null;
 
-  function AgentCard({ group }: { group: AgentExecutionGroup }) {
-    const layoutId = NODE_KEY_TO_LAYOUT[group.nodeKey] || group.nodeKey;
-    const layout = BUSINESS_DAG_LAYOUT.find((l) => l.id === layoutId);
-    if (!layout) return null;
+  const baseLayout = useMemo(() => {
+    if (narrow) return computeVerticalDagLayout(DAG_ORDER, DEFAULT_NODE_W, DEFAULT_NODE_H);
+    return computeBusinessDagLayout(DEFAULT_NODE_W, DEFAULT_NODE_H);
+  }, [narrow]);
 
+  const layout = baseLayout.layout.filter((l) => visibleKeys.has(l.id));
+  const edges = narrow
+    ? layout.slice(0, -1).map((l, i) => ({ from: layout[i].id, to: layout[i + 1].id }))
+    : visibleEdges;
+
+  function AgentCard({ group, layoutItem }: { group: AgentExecutionGroup; layoutItem: { x: number; y: number; width?: number } }) {
+    const nw = layoutItem.width ?? DEFAULT_NODE_W;
     return (
       <button
         type="button"
         onClick={() => setExpandedGroup(expandedGroup === group.traceNodeId ? null : group.traceNodeId)}
-        className={`absolute w-[180px] rounded-xl border border-primary/10 bg-white p-3 text-left transition hover:shadow-md ${
-          expandedGroup === group.traceNodeId ? "border-accent ring-2 ring-accent/20" : ""
+        className={`absolute rounded-xl border bg-white p-3 text-left transition hover:shadow-lg ${
+          expandedGroup === group.traceNodeId ? "border-accent ring-2 ring-accent/20" : "border-primary/10"
         }`}
-        style={{ left: layout.x, top: layout.y }}
+        style={{ left: layoutItem.x, top: layoutItem.y, width: nw }}
       >
         <div className="flex items-start gap-2">
           <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-accent/10 text-[10px] font-bold text-accent">
@@ -92,9 +102,11 @@ export function AgentTraceDag({ nodes, traceId, runStatus, traceCompleteness }: 
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-1">
               <span className="text-xs font-bold text-primary truncate">{group.title}</span>
-              <span className={`rounded border px-1 py-0.5 text-[9px] font-bold ${statusBadge(group.status)}`}>{group.status}</span>
+              <span className={`rounded border px-1 py-0.5 text-[9px] font-bold ${statusBadge(group.status)}`}>
+                {statusLabelZh(group.status)}
+              </span>
             </div>
-            <p className="text-[9px] font-mono text-ink/40 truncate">{group.agent}</p>
+            <p className="text-[10px] text-ink/50 truncate">{agentLabel(group.agent)}</p>
             <p className="text-[9px] text-ink/40">{group.durationMs}ms</p>
             <div className="mt-2">
               <CallSummaryChips calls={group.calls as Record<string, unknown>} />
@@ -106,16 +118,18 @@ export function AgentTraceDag({ nodes, traceId, runStatus, traceCompleteness }: 
   }
 
   return (
-    <div className="space-y-4 min-w-0">
-      <div>
-        <h3 className="text-lg font-bold text-primary">Agent 执行 Trace DAG</h3>
-        <p className="text-xs text-ink/50">6 个 Agent 执行节点，RAG / Skill / Tool / Sandbox / MCP 绑定在对应 Agent 内部</p>
-        <p className="text-xs text-ink/50 font-mono break-all mt-1">traceId: {traceId}</p>
-      </div>
+    <div className={`min-w-0 ${compact ? "space-y-3" : "space-y-4"}`}>
+      {!compact && (
+        <div>
+          <h3 className="text-lg font-bold text-primary">Trace 执行工作台</h3>
+          <p className="text-xs text-ink/50">6 个 Agent 节点 · 点击后在右侧查看内部执行流</p>
+          <p className="text-xs text-ink/40 font-mono break-all mt-1">运行标识 {traceId}</p>
+        </div>
+      )}
 
       {ragEmptyCount > 0 && (
         <div className="rounded-xl border border-warning/30 bg-warning/5 px-4 py-3 text-xs text-warning">
-          知识库未命中：{ragEmptyCount} 个 Agent RAG 空召回，当前审核基于静态规则，置信度低
+          知识库空召回 {ragEmptyCount} 处，审核置信度偏低
         </div>
       )}
 
@@ -139,28 +153,40 @@ export function AgentTraceDag({ nodes, traceId, runStatus, traceCompleteness }: 
       {visibleGroups.length === 0 ? (
         <div className="text-center py-8 space-y-2">
           <p className="text-sm font-bold text-ink/60">{emptyMsg.title}</p>
-          <p className="text-xs text-ink/40 max-w-md mx-auto">{emptyMsg.detail}</p>
+          <p className="text-xs text-ink/40">{emptyMsg.detail}</p>
         </div>
       ) : (
-        <div className="overflow-x-auto pb-2">
-          <DagCanvas width={800} height={440} nodes={BUSINESS_DAG_LAYOUT} edges={visibleEdges}>
-            {visibleGroups.map((group) => (
-              <AgentCard key={group.traceNodeId || group.nodeKey} group={group} />
-            ))}
-          </DagCanvas>
-        </div>
-      )}
-
-      {expanded && (
-        <div className="rounded-xl border border-accent/20 bg-surface/30 p-4 space-y-3">
-          <div className="flex items-center justify-between gap-2">
-            <div>
-              <span className="font-bold text-primary">{expanded.title}</span>
-              <p className="text-[10px] font-mono text-ink/40">{expanded.agent} · {expanded.nodeKey} · seq {expanded.sequence}</p>
-            </div>
-            <button onClick={() => setExpandedGroup(null)} className="text-ink/40 hover:text-primary shrink-0">收起</button>
+        <div className={`grid gap-4 ${expanded && !narrow ? "lg:grid-cols-[1fr_360px]" : ""}`}>
+          <div className="overflow-x-auto pb-2 min-w-0">
+            <DagCanvas
+              width={baseLayout.width}
+              height={baseLayout.height}
+              nodes={layout}
+              edges={edges}
+              nodeWidth={DEFAULT_NODE_W}
+              nodeHeight={DEFAULT_NODE_H}
+              laneLabels={narrow ? undefined : BUSINESS_DAG_LANE_LABELS}
+            >
+              {visibleGroups.map((group) => {
+                const layoutItem = layout.find((l) => l.id === group.nodeKey);
+                if (!layoutItem) return null;
+                return <AgentCard key={group.traceNodeId || group.nodeKey} group={group} layoutItem={layoutItem} />;
+              })}
+            </DagCanvas>
           </div>
-          <CallReportPanel calls={expanded.calls as Record<string, unknown>} title="Agent 内部执行调用" />
+
+          {expanded && (
+            <div className="rounded-xl border border-accent/20 bg-surface/30 p-4 space-y-3 lg:sticky lg:top-20 lg:self-start">
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <span className="font-bold text-primary">{expanded.title}</span>
+                  <p className="text-[10px] text-ink/50">{agentLabel(expanded.agent)} · 第 {expanded.sequence} 步</p>
+                </div>
+                <button type="button" onClick={() => setExpandedGroup(null)} className="text-ink/40 hover:text-primary shrink-0 text-xs">收起</button>
+              </div>
+              <CallReportPanel calls={expanded.calls as Record<string, unknown>} title="内部执行流" />
+            </div>
+          )}
         </div>
       )}
     </div>

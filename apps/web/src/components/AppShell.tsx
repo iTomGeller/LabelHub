@@ -1,5 +1,7 @@
 "use client";
 
+import { GRAFANA_AGENT_DASHBOARD_URL } from "@/lib/diagnosticLabels";
+
 const navItems = [
   { key: "list", label: "任务列表", href: "/?view=list", external: false },
   { key: "trace", label: "开发者 Trace", href: "/?view=trace", external: false },
@@ -7,7 +9,7 @@ const navItems = [
   {
     key: "grafana",
     label: "监控面板",
-    href: "/grafana/d/labelhub-agent-rag-trace/labelhub-agent-rag-trace-e79b91-e68ea7?orgId=1&from=now-6h&to=now",
+    href: GRAFANA_AGENT_DASHBOARD_URL,
     external: true,
   },
 ] as const;

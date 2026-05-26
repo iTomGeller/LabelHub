@@ -3,15 +3,13 @@
 import { useState, useEffect } from "react";
 import { SubTabs } from "./SubTabs";
 import { KnowledgeBasePanel } from "./KnowledgeBasePanel";
+import { GRAFANA_AGENT_DASHBOARD_URL } from "@/lib/diagnosticLabels";
 
 const TABS = [
   { key: "ai", label: "AI 服务状态" },
   { key: "knowledge", label: "知识库" },
   { key: "export", label: "导出设置" },
 ];
-
-const GRAFANA_DASHBOARD_URL =
-  "/grafana/d/labelhub-agent-rag-trace/labelhub-agent-rag-trace?orgId=1&from=now-6h&to=now";
 
 function resolveTab(tab?: string) {
   return TABS.some((t) => t.key === tab) ? tab! : "ai";
@@ -125,8 +123,8 @@ function AiSettings() {
         <button onClick={handleTest} disabled={testing} className="rounded-xl border border-accent px-5 py-2.5 text-sm font-bold text-accent hover:bg-accent/5 disabled:opacity-50">
           {testing ? "测试中…" : "测试连接"}
         </button>
-        <a href={GRAFANA_DASHBOARD_URL} target="_blank" rel="noopener" className="rounded-xl border border-primary/15 px-5 py-2.5 text-sm font-bold text-primary hover:bg-surface/50">
-          打开 Agent 级监控面板
+        <a href={GRAFANA_AGENT_DASHBOARD_URL} target="_blank" rel="noopener" className="rounded-xl border border-primary/15 px-5 py-2.5 text-sm font-bold text-primary hover:bg-surface/50">
+          打开 Agent 诊断台
         </a>
       </div>
 
@@ -141,7 +139,7 @@ function AiSettings() {
         <ul className="mt-2 space-y-1 text-xs text-ink/60">
           <li>DeepSeek API Key 通过服务端环境变量配置，前端无需操作</li>
           <li>创建任务时点击 AI 一键配置 即可自动生成标注方案</li>
-          <li>Grafana 看板按 Agent 拆分 RAG、Skill、ToolCall、MCP 指标</li>
+          <li>Grafana 诊断台按 Agent 拆分知识库、技能、工具、MCP 指标</li>
         </ul>
       </div>
     </div>

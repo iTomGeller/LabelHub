@@ -7,134 +7,128 @@
   "links": [],
   "panels": [
     {
-      "title": "成功 Run 数",
+      "title": "成功运行",
       "type": "stat",
       "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
-      "fieldConfig": { "defaults": { "noValue": "无运行", "color": { "mode": "fixed", "fixedColor": "green" } }, "overrides": [] },
-      "targets": [{ "expr": "sum(audit_run_total{status=\"success\"})", "legendFormat": "success" }]
+      "fieldConfig": { "defaults": { "noValue": "暂无", "color": { "mode": "fixed", "fixedColor": "green" } }, "overrides": [] },
+      "targets": [{ "expr": "sum(audit_run_total{status=\"success\"}) or vector(0)", "legendFormat": "成功" }]
     },
     {
-      "title": "警告 Run 数",
+      "title": "警告运行",
       "type": "stat",
       "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
-      "fieldConfig": { "defaults": { "noValue": "无运行", "color": { "mode": "fixed", "fixedColor": "yellow" } }, "overrides": [] },
-      "targets": [{ "expr": "sum(audit_run_total{status=\"warning\"})", "legendFormat": "warning" }]
+      "fieldConfig": { "defaults": { "noValue": "暂无", "color": { "mode": "fixed", "fixedColor": "yellow" } }, "overrides": [] },
+      "targets": [{ "expr": "sum(audit_run_total{status=\"warning\"}) or vector(0)", "legendFormat": "警告" }]
     },
     {
       "title": "Trace 完整率",
       "type": "stat",
       "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
-      "fieldConfig": { "defaults": { "noValue": "无运行", "unit": "percentunit", "min": 0, "max": 1 }, "overrides": [] },
-      "targets": [{ "expr": "sum(agent_trace_run_total{trace_completeness=\"true\"}) / clamp_min(sum(agent_trace_run_total), 1)", "legendFormat": "完整率" }]
+      "fieldConfig": { "defaults": { "noValue": "暂无", "unit": "percentunit", "min": 0, "max": 1 }, "overrides": [] },
+      "targets": [{ "expr": "sum(agent_trace_run_total{trace_completeness=\"true\"}) / clamp_min(sum(agent_trace_run_total) or vector(1), 1)", "legendFormat": "完整率" }]
     },
     {
-      "title": "当前 Agent 空召回",
+      "title": "筛选·空召回",
       "type": "stat",
       "gridPos": { "h": 4, "w": 4, "x": 12, "y": 0 },
-      "fieldConfig": { "defaults": { "noValue": "无空召回", "color": { "mode": "fixed", "fixedColor": "orange" } }, "overrides": [] },
-      "targets": [{ "expr": "sum(agent_rag_run_empty_total{agent=~\"$agent\", node=~\"$node\"})", "legendFormat": "空召回" }]
+      "fieldConfig": { "defaults": { "noValue": "无", "color": { "mode": "fixed", "fixedColor": "orange" } }, "overrides": [] },
+      "targets": [{ "expr": "sum(agent_rag_run_empty_total{agent=~\"$agent\", node=~\"$node\"}) or vector(0)", "legendFormat": "空召回" }]
     },
     {
-      "title": "当前 Agent Tool 异常",
+      "title": "筛选·工具异常",
       "type": "stat",
       "gridPos": { "h": 4, "w": 4, "x": 16, "y": 0 },
-      "fieldConfig": { "defaults": { "noValue": "无 Tool 异常", "color": { "mode": "fixed", "fixedColor": "red" } }, "overrides": [] },
-      "targets": [{ "expr": "sum(agent_tool_call_total{agent=~\"$agent\", node=~\"$node\", status!=\"success\"})", "legendFormat": "tool errors" }]
+      "fieldConfig": { "defaults": { "noValue": "无", "color": { "mode": "fixed", "fixedColor": "red" } }, "overrides": [] },
+      "targets": [{ "expr": "sum(agent_tool_call_total{agent=~\"$agent\", node=~\"$node\", status!=\"success\"}) or vector(0)", "legendFormat": "异常" }]
     },
     {
-      "title": "当前 Agent MCP 不可用",
+      "title": "筛选·MCP 不可用",
       "type": "stat",
       "gridPos": { "h": 4, "w": 4, "x": 20, "y": 0 },
-      "fieldConfig": { "defaults": { "noValue": "MCP 未配置", "color": { "mode": "fixed", "fixedColor": "semi-dark-orange" } }, "overrides": [] },
-      "targets": [{ "expr": "sum(agent_mcp_call_total{agent=~\"$agent\", node=~\"$node\", status=\"unavailable\"})", "legendFormat": "mcp unavailable" }]
+      "fieldConfig": { "defaults": { "noValue": "未配置", "color": { "mode": "fixed", "fixedColor": "text" } }, "overrides": [] },
+      "targets": [{ "expr": "sum(agent_mcp_call_total{agent=~\"$agent\", node=~\"$node\", status=\"unavailable\"}) or vector(0)", "legendFormat": "不可用" }]
     },
     {
-      "title": "Agent/Node 诊断表",
+      "title": "Agent/Node 根因表",
       "type": "table",
-      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 4 },
+      "gridPos": { "h": 11, "w": 24, "x": 0, "y": 4 },
       "fieldConfig": { "defaults": { "custom": { "align": "auto" } }, "overrides": [] },
       "transformations": [
         { "id": "merge", "options": {} },
         {
           "id": "organize",
           "options": {
+            "excludeByName": { "Time": true },
             "renameByName": {
-              "Value #rag_hit": "RAG 命中",
-              "Value #rag_empty": "RAG 空召回",
-              "Value #skill_findings": "Skill Findings",
-              "Value #tool_ok": "Tool 成功",
-              "Value #tool_err": "Tool 异常",
-              "Value #mcp_ok": "MCP 可用",
-              "Value #mcp_bad": "MCP 不可用",
-              "Value #p95": "P95 耗时"
+              "agent": "Agent",
+              "node": "节点",
+              "Value #rag_empty": "空召回",
+              "Value #tool_err": "工具异常",
+              "Value #mcp_bad": "MCP不可用",
+              "Value #skill_findings": "技能发现",
+              "Value #tool_ok": "工具成功",
+              "Value #rag_hit": "知识库命中",
+              "Value #p95": "P95耗时"
             }
           }
         }
       ],
       "targets": [
-        { "expr": "sum by (agent, node) (agent_rag_retrieval_total{agent=~\"$agent\", node=~\"$node\", status=\"hit\"})", "format": "table", "instant": true, "legendFormat": "", "refId": "rag_hit" },
-        { "expr": "sum by (agent, node) (agent_rag_run_empty_total{agent=~\"$agent\", node=~\"$node\"})", "format": "table", "instant": true, "legendFormat": "", "refId": "rag_empty" },
-        { "expr": "sum by (agent, node) (agent_skill_finding_total{agent=~\"$agent\", node=~\"$node\"})", "format": "table", "instant": true, "legendFormat": "", "refId": "skill_findings" },
-        { "expr": "sum by (agent, node) (agent_tool_call_total{agent=~\"$agent\", node=~\"$node\", status=\"success\"})", "format": "table", "instant": true, "legendFormat": "", "refId": "tool_ok" },
-        { "expr": "sum by (agent, node) (agent_tool_call_total{agent=~\"$agent\", node=~\"$node\", status!=\"success\"})", "format": "table", "instant": true, "legendFormat": "", "refId": "tool_err" },
-        { "expr": "sum by (agent, node) (agent_mcp_call_total{agent=~\"$agent\", node=~\"$node\", status=\"available\"})", "format": "table", "instant": true, "legendFormat": "", "refId": "mcp_ok" },
-        { "expr": "sum by (agent, node) (agent_mcp_call_total{agent=~\"$agent\", node=~\"$node\", status=\"unavailable\"})", "format": "table", "instant": true, "legendFormat": "", "refId": "mcp_bad" },
-        { "expr": "histogram_quantile(0.95, sum by (le, agent, node) (rate(audit_node_duration_seconds_bucket{agent=~\"$agent\", node=~\"$node\"}[5m])))", "format": "table", "instant": true, "legendFormat": "", "refId": "p95" }
+        { "expr": "sum by (agent, node) (agent_rag_run_empty_total{agent=~\"$agent\", node=~\"$node\"}) or on(agent,node) sum by (agent, node) (agent_trace_node_total{agent=~\"$agent\", node=~\"$node\"}) * 0", "format": "table", "instant": true, "refId": "rag_empty" },
+        { "expr": "sum by (agent, node) (agent_tool_call_total{agent=~\"$agent\", node=~\"$node\", status!=\"success\"}) or on(agent,node) sum by (agent, node) (agent_trace_node_total{agent=~\"$agent\", node=~\"$node\"}) * 0", "format": "table", "instant": true, "refId": "tool_err" },
+        { "expr": "sum by (agent, node) (agent_mcp_call_total{agent=~\"$agent\", node=~\"$node\", status=\"unavailable\"}) or on(agent,node) sum by (agent, node) (agent_trace_node_total{agent=~\"$agent\", node=~\"$node\"}) * 0", "format": "table", "instant": true, "refId": "mcp_bad" },
+        { "expr": "sum by (agent, node) (agent_skill_finding_total{agent=~\"$agent\", node=~\"$node\"}) or on(agent,node) sum by (agent, node) (agent_trace_node_total{agent=~\"$agent\", node=~\"$node\"}) * 0", "format": "table", "instant": true, "refId": "skill_findings" },
+        { "expr": "sum by (agent, node) (agent_tool_call_total{agent=~\"$agent\", node=~\"$node\", status=\"success\"}) or on(agent,node) sum by (agent, node) (agent_trace_node_total{agent=~\"$agent\", node=~\"$node\"}) * 0", "format": "table", "instant": true, "refId": "tool_ok" },
+        { "expr": "sum by (agent, node) (agent_rag_retrieval_total{agent=~\"$agent\", node=~\"$node\", status=\"hit\"}) or on(agent,node) sum by (agent, node) (agent_trace_node_total{agent=~\"$agent\", node=~\"$node\"}) * 0", "format": "table", "instant": true, "refId": "rag_hit" },
+        { "expr": "histogram_quantile(0.95, sum by (le, agent, node) (rate(audit_node_duration_seconds_bucket{agent=~\"$agent\", node=~\"$node\"}[5m]))) or on(agent,node) sum by (agent, node) (agent_trace_node_total{agent=~\"$agent\", node=~\"$node\"}) * 0", "format": "table", "instant": true, "refId": "p95" }
       ]
     },
     {
-      "title": "RAG 空召回 by Node",
+      "title": "空召回分布",
       "type": "bargauge",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 14 },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 15 },
       "fieldConfig": {
         "defaults": { "noValue": "无空召回", "min": 0, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] } },
         "overrides": []
       },
-      "targets": [{ "expr": "sum by (agent, node) (agent_rag_run_empty_total{agent=~\"$agent\", node=~\"$node\"})", "legendFormat": "{{agent}} · {{node}}" }]
+      "options": { "orientation": "horizontal", "displayMode": "gradient" },
+      "targets": [{ "expr": "sum by (agent, node) (agent_rag_run_empty_total{agent=~\"$agent\", node=~\"$node\"}) or vector(0)", "legendFormat": "{{agent}} / {{node}}" }]
     },
     {
-      "title": "ToolCall 状态 by Node",
+      "title": "工具调用状态",
       "type": "bargauge",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 14 },
-      "fieldConfig": { "defaults": { "noValue": "无 ToolCall" }, "overrides": [] },
-      "targets": [{ "expr": "sum by (agent, node, status) (agent_tool_call_total{agent=~\"$agent\", node=~\"$node\"})", "legendFormat": "{{agent}} · {{node}} · {{status}}" }]
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 15 },
+      "fieldConfig": { "defaults": { "noValue": "暂无调用" }, "overrides": [] },
+      "options": { "orientation": "horizontal", "displayMode": "gradient" },
+      "targets": [{ "expr": "sum by (agent, node, status) (agent_tool_call_total{agent=~\"$agent\", node=~\"$node\"}) or vector(0)", "legendFormat": "{{agent}} / {{node}} / {{status}}" }]
     },
     {
-      "title": "Skill Findings 趋势",
-      "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 22 },
-      "fieldConfig": { "defaults": { "noValue": "无 Skill findings" }, "overrides": [] },
-      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull"] } },
-      "targets": [{ "expr": "sum by (agent, node) (increase(agent_skill_finding_total{agent=~\"$agent\", node=~\"$node\"}[5m]))", "legendFormat": "{{agent}} · {{node}}" }]
-    },
-    {
-      "title": "节点耗时 P95",
-      "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 22 },
-      "fieldConfig": { "defaults": { "noValue": "无运行", "unit": "s" }, "overrides": [] },
-      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull"] } },
-      "targets": [{ "expr": "histogram_quantile(0.95, sum by (le, agent, node) (rate(audit_node_duration_seconds_bucket{agent=~\"$agent\", node=~\"$node\"}[5m])))", "legendFormat": "{{agent}} · {{node}}" }]
-    },
-    {
-      "title": "MCP 探测状态",
+      "title": "MCP 探测",
       "type": "bargauge",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 30 },
-      "fieldConfig": { "defaults": { "noValue": "MCP 未配置" }, "overrides": [] },
-      "targets": [{ "expr": "sum by (agent, server, status) (agent_mcp_call_total{agent=~\"$agent\", node=~\"$node\"})", "legendFormat": "{{agent}} · {{server}} · {{status}}" }]
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 15 },
+      "fieldConfig": { "defaults": { "noValue": "未配置 MCP" }, "overrides": [] },
+      "options": { "orientation": "horizontal", "displayMode": "gradient" },
+      "targets": [{ "expr": "sum by (agent, server, status) (agent_mcp_call_total{agent=~\"$agent\", node=~\"$node\"}) or vector(0)", "legendFormat": "{{agent}} / {{server}} / {{status}}" }]
     },
     {
-      "title": "Trace Run 完整/不完整",
+      "title": "技能发现趋势",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 30 },
-      "fieldConfig": { "defaults": { "noValue": "无运行" }, "overrides": [] },
-      "targets": [
-        { "expr": "sum(increase(agent_trace_run_total{trace_completeness=\"true\"}[5m]))", "legendFormat": "完整 run" },
-        { "expr": "sum(increase(agent_trace_run_total{trace_completeness=\"false\"}[5m]))", "legendFormat": "不完整 run" }
-      ]
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 23 },
+      "fieldConfig": { "defaults": { "noValue": "暂无" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull"] } },
+      "targets": [{ "expr": "sum by (agent, node) (increase(agent_skill_finding_total{agent=~\"$agent\", node=~\"$node\"}[5m])) or vector(0)", "legendFormat": "{{agent}} / {{node}}" }]
+    },
+    {
+      "title": "节点 P95 耗时",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 23 },
+      "fieldConfig": { "defaults": { "noValue": "暂无", "unit": "s" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull"] } },
+      "targets": [{ "expr": "histogram_quantile(0.95, sum by (le, agent, node) (rate(audit_node_duration_seconds_bucket{agent=~\"$agent\", node=~\"$node\"}[5m])))", "legendFormat": "{{agent}} / {{node}}" }]
     }
   ],
   "schemaVersion": 38,
-  "tags": ["labelhub", "agent", "diagnostic", "trace"],
+  "tags": ["labelhub", "agent", "diagnostic"],
   "templating": {
     "list": [
       {
@@ -151,7 +145,7 @@
       {
         "name": "node",
         "type": "query",
-        "label": "Node",
+        "label": "节点",
         "datasource": { "type": "prometheus", "uid": "prometheus" },
         "query": { "query": "label_values(agent_trace_node_total{agent=~\"$agent\"}, node)", "refId": "PrometheusVariableQueryEditor-VariableQuery" },
         "includeAll": true,
@@ -164,5 +158,5 @@
   "time": { "from": "now-6h", "to": "now" },
   "title": "LabelHub Agent 诊断台",
   "uid": "labelhub-agent-rag-trace",
-  "version": 2
+  "version": 3
 }

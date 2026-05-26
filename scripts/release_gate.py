@@ -59,6 +59,8 @@ def business_trace_match(business_dag, trace_id):
 def validate_grafana_dashboard(dashboard_json):
     text = json.dumps(dashboard_json, ensure_ascii=False)
     stale = 0
+    if "LabelHub Agent 级监控" in text:
+        stale += 1
     if "RAG 命中率 (全 Agent)" in text:
         stale += 1
     if "1 - (sum(trace_persist_failed_total)" in text:
