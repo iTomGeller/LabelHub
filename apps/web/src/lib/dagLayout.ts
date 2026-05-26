@@ -1,7 +1,7 @@
 import type { DagEdge, DagNodeLayout } from "@/components/DagCanvas";
 
-export const DEFAULT_NODE_W = 200;
-export const DEFAULT_NODE_H = 96;
+export const DEFAULT_NODE_W = 240;
+export const DEFAULT_NODE_H = 118;
 const H_GAP = 48;
 const V_GAP = 72;
 const PAD = 32;

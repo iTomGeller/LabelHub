@@ -60,6 +60,13 @@ public class AuditRunController {
         return ResponseEntity.ok(result);
     }
 
+    @GetMapping("/by-task/{taskId}/latest")
+    public ResponseEntity<AgentRunResult> findLatestByTask(@PathVariable String taskId) {
+        var result = agentRunService.findLatestCompleteRun(taskId);
+        if (result == null) return ResponseEntity.notFound().build();
+        return ResponseEntity.ok(result);
+    }
+
     @GetMapping("/by-task/{taskId}")
     public ResponseEntity<AgentRunResult> findByTaskAndHash(
         @PathVariable String taskId,

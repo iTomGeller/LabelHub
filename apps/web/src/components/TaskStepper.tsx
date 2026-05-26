@@ -1204,6 +1204,7 @@ function StepPublish({
   const [fromCache, setFromCache] = useState(false);
   const [currentHash, setCurrentHash] = useState("");
   const [cacheRejected, setCacheRejected] = useState(false);
+  const [hashMismatch, setHashMismatch] = useState(false);
 
   function clearAuditState() {
     setDagResult(null);
@@ -1304,6 +1305,7 @@ function StepPublish({
       if (cancelled) return;
       setCurrentHash(hash);
       clearAuditState();
+      setHashMismatch(false);
 
       const localCache = loadAuditCache(config.taskId);
 
@@ -1314,6 +1316,18 @@ function StepPublish({
           if (!cancelled) {
             await applyAuditPayload(data, hash);
             setCacheRejected(false);
+            setHashMismatch(false);
+          }
+          return;
+        }
+
+        const latestRes = await fetch(`/agent-api/agents/audit-runs/by-task/${encodeURIComponent(config.taskId)}/latest`);
+        if (latestRes.ok) {
+          const data = await latestRes.json();
+          if (!cancelled && (data.businessDag?.length || 0) > 0) {
+            await applyAuditPayload(data, hash);
+            setCacheRejected(false);
+            setHashMismatch(data.configHash !== hash);
           }
           return;
         }
@@ -1406,6 +1420,7 @@ function StepPublish({
             loading={dagLoading}
             fromCache={fromCache}
             isCacheValid={isCacheValid}
+            hashMismatch={hashMismatch}
             traceId={traceId}
             onForceRerun={() => runAuditCheck(true)}
             onJumpToStep={onJumpToStep}
@@ -1415,10 +1430,10 @@ function StepPublish({
             <div className="flex items-center justify-between mb-4">
               <div>
                 <h3 className="text-lg font-bold text-primary">AI 质量审核</h3>
-                <p className="text-xs text-ink/50">基于知识库和规则对任务配置进行多维度评估</p>
+                <p className="text-xs text-ink/50">当前没有匹配配置的审核结果，可生成新报告或等待加载最近结果</p>
               </div>
               <button onClick={() => runAuditCheck(false)} disabled={dagLoading} className="rounded-xl bg-accent px-4 py-2 text-sm font-bold text-white hover:bg-accent/90 disabled:opacity-50">
-                {dagLoading ? "审核中…" : "开始审核"}
+                {dagLoading ? "审核中…" : "开始生成审核报告"}
               </button>
             </div>
             {dagLoading && (

@@ -1,0 +1,38 @@
+[
+  {
+    "id": "kseed_annot_spec",
+    "title": "标注规范 · 文本分类与情感标注",
+    "category": "标注规范",
+    "content": "LabelHub 标注规范（任务说明审查）\n\n## 客服对话情感分类\n任务名称：客服对话情感分类。标注员需根据客服对话内容判断用户情感倾向，可选类别：正面、负面、中性、混合。\n必须标注触发情绪的关键句，并给出判断理由。理由需引用对话原文，不得臆测用户未表达的情绪。\n\n## 电商评论实体抽取\n任务名称：电商评论实体抽取。从评论中抽取商品名称、品牌、属性描述、问题类型等命名实体。\n实体边界必须精确，抽取文本必须是原文出现的片段，不得修改或缩写。\n\n## 问答对质量评估\n任务名称：问答对质量评估。从准确性、完整性、流畅性、安全性四个维度对 AI 生成的问答对打分（1-5）。\n须标注具体问题类型并给出改进建议，安全性涉及健康、法律、金融等内容时须谨慎标注。\n\n## 通用要求\n任务说明必须包含：标注目标、类别定义、必填字段说明、边界案例处理原则。\n说明应使用中文，避免仅写技术字段名而不解释业务含义。"
+  },
+  {
+    "id": "kseed_data_spec",
+    "title": "数据规范 · 样例与字段覆盖",
+    "category": "数据规范",
+    "content": "LabelHub 数据规范（样例数据审查）\n\n## 客服情感分类样例要求\n样例数据应覆盖正面、负面、中性、咨询类对话。推荐至少 5 条样例，包含：愤怒投诉（如“破售后”“没人理”）、满意感谢、中性咨询（如“退货地址”）、物流抱怨、五星好评。\n每条样例应包含 dialogue、sessionId、agent 等原始字段，便于标注员理解上下文。\n\n## 实体抽取样例要求\n样例应覆盖不同商品类目（手机、运动鞋、电视、护肤、家电），评论中须同时出现品牌、商品名、属性词。\n正负属性混合的评论（如“拍照好但续航差”）应作为重点样例。\n\n## 问答质检样例要求\n样例应覆盖不同难度（easy/medium/hard）和来源（code-qa、science-qa、health-qa）。\n须包含准确回答、部分错误回答、信息缺失回答，便于评估维度区分。\n\n## 通用数据质量\n禁止空字段占多数；关键业务字段不得全部缺失；样例语言与任务说明一致（中文任务用中文样例）。"
+  },
+  {
+    "id": "kseed_template_spec",
+    "title": "模板规范 · 标注组件与字段设计",
+    "category": "模板规范",
+    "content": "LabelHub 模板规范（标注 Schema 审查）\n\n## 客服情感分类模板\n必备组件：情感倾向（singleChoice，选项：正面/负面/中性/混合）、触发关键句（shortText，须引用原文）、情绪类型（multiChoice）、判断理由（longText，至少 8 字）。\n展示组件 raw_dialogue 用于呈现原始对话，dataPath 应指向 $.raw.dialogue。\n\n## 实体抽取模板\n必备组件：商品名称、品牌（shortText）、提及属性（multiChoice）、属性情感（singleChoice）、证据文本段（longText）。\n证据段必须是原文片段，与属性标注一一对应。\n\n## 问答质检模板\n必备组件：准确性评分、完整性评分、流畅性评分、安全性（singleChoice）、存在问题（multiChoice）、改进建议（longText）。\n评分选项须与 rubric 维度一致，1-5 分语义清晰。\n\n## 通用模板原则\n每个必填组件须有 validation（required）；showItem 用于只读展示；选项枚举须与任务说明中的类别定义一致。"
+  },
+  {
+    "id": "kseed_quality_rules",
+    "title": "质检规则 · 评分维度与违规判定",
+    "category": "质检规则",
+    "content": "LabelHub 质检规则规范（Rubric 审查）\n\n## 客服情感分类规则\nR1：情感标注须与对话语气一致，不得臆测。正面示例：对话有“破售后”等愤怒用语标为负面。负面示例：询问退货地址标为负面。\nR2：触发关键句必须是原文直接引用，不得自行编写总结。\nR3：混合情感须同时给出正负面依据，不能只说一面。\n评分维度：情感准确性、关键句引用、理由充分性、一致性。\n\n## 实体抽取规则\nR1：实体抽取必须是原文出现的文本，不得修改（critical）。\nR2：属性标注须与证据段对应，不可凭推测。\nR3：同一评论多属性时应分别标注情感。\n\n## 问答质检规则\nR1：评分必须与选择的问题类型一致，高分不能有严重问题。\nR2：安全性标注优先级最高，涉及健康/法律须谨慎。\nR3：改进建议须针对已标注的问题，不可空泛。\n\n## 通用规则要求\n每条规则须有 ruleId、description、severity、appliesTo、positiveExamples、negativeExamples。"
+  },
+  {
+    "id": "kseed_project_req",
+    "title": "项目要求 · 发布评估与置信度",
+    "category": "项目要求",
+    "content": "LabelHub 项目要求（综合评估审查）\n\n## 发布前检查清单\n任务说明、样例数据、标注模板、质检规则、分配策略、Agent 策略六项必须齐备。\n客服情感分类任务：须确认情感类别覆盖（正面/负面/中性/咨询）、触发句字段、理由字段均已配置。\n\n## 置信度与风险\n若知识库空召回，综合评估应标注“低置信通过”，说明当前判断依赖静态规则而非业务知识。\n若缺少质检规则，风险等级为 high，不建议直接发布。\n若样例不足 3 条，标注质量可能无法保障，建议补充后再发布。\n\n## 分配与 Agent 策略\n客服情感分类推荐 replicasPerItem=2（双人标注），confidenceThreshold 建议 ≥ 0.85。\n实体抽取可单人标注；问答质检涉及安全性时建议提高 precheck 阈值。\n\n## 综合结论模板\n可发布：配置完整且主要风险已消除。低置信：可发布但 RAG/样例/规则存在缺口。需修复：存在 blocking 项，须返回对应步骤修改。"
+  },
+  {
+    "id": "kseed_contract_spec",
+    "title": "契约规范 · TaskPackage 输出结构",
+    "category": "契约规范",
+    "content": "LabelHub 契约规范（TaskPackage 组装审查）\n\n## TaskPackage 必备字段\ntaskId、schemaVersionId、instructionVersionId、rubricVersionId、datasetId、title、status、schema、rubric、sampleItems、assignmentPolicy、agentPolicy、traceId。\n\n## Schema 契约\ncomponents 数组每项含 id、type、label、dataPath、required、props、validation。\n支持的 type 包括：showItem、shortText、longText、singleChoice、multiChoice、tagSelect、richText、fileUpload、jsonEditor、llmInteraction。\n\n## Rubric 契约\nrules 数组含 ruleId、description、severity、appliesTo、positiveExamples、negativeExamples、allowAgentAutoPass。\ndimensions 数组列出评分维度名称，须与模板和规则一致。\n\n## 客服情感分类输出示例\ntaskId=task_text_cls_001，组件含 sentiment、trigger_sentence、reason，规则至少 3 条，样例至少 5 条。\n\n## 发布契约\n发布后标注员可领取任务；traceId 用于审计追溯；frozen 字段标识版本是否锁定。"
+  }
+]

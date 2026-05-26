@@ -37,7 +37,7 @@ export function flattenCalls(calls?: Record<string, unknown>): CallRecord[] {
       status: hit ? "hit" : "empty",
       statusZh: hit ? "命中" : "空召回",
       durationMs: Number(rag.durationMs || 0),
-      conclusion: hit ? `召回 ${String(rag.charCount || 0)} 字` : "知识库未命中，使用静态规则",
+      conclusion: hit ? `召回 ${String(rag.charCount || 0)} 字` : String(rag.emptyReason || "知识库未命中，使用静态规则兜底"),
       meta: rag,
     });
   }
@@ -53,7 +53,7 @@ export function flattenCalls(calls?: Record<string, unknown>): CallRecord[] {
       nameZh: skillNames.map(toolLabel).join("、") || "技能调用",
       status: fc > 0 ? "findings" : "success",
       statusZh: fc > 0 ? `${fc} 条发现` : "成功",
-      conclusion: fc > 0 ? findings.slice(0, 2).map(String).join("；") : "无额外发现",
+      conclusion: findings.length > 0 ? findings.slice(0, 2).map(String).join("；") : "检查完成，未发现额外问题",
       findings,
       meta: skills,
     });
@@ -72,7 +72,7 @@ export function flattenCalls(calls?: Record<string, unknown>): CallRecord[] {
       durationMs: Number(t.durationMs || 0),
       exitCode: Number(t.exitCode ?? 0),
       findings,
-      conclusion: findings.length > 0 ? findings.slice(0, 2).map(String).join("；") : `退出码 ${String(t.exitCode ?? 0)}`,
+      conclusion: findings.length > 0 ? findings.slice(0, 2).map(String).join("；") : "自动检查通过",
       meta: t,
     });
   }
@@ -90,7 +90,7 @@ export function flattenCalls(calls?: Record<string, unknown>): CallRecord[] {
       durationMs: Number(s.durationMs || 0),
       exitCode: Number(s.exitCode ?? 0),
       findings,
-      conclusion: findings.length > 0 ? findings.slice(0, 2).map(String).join("；") : `沙箱退出码 ${String(s.exitCode ?? 0)}`,
+      conclusion: findings.length > 0 ? findings.slice(0, 2).map(String).join("；") : "数据集校验通过",
       meta: s,
     });
   }

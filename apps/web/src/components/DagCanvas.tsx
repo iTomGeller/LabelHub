@@ -25,6 +25,7 @@ interface Props {
   nodeWidth?: number;
   nodeHeight?: number;
   laneLabels?: { y: number; label: string }[];
+  highlightNodeIds?: string[];
   children: ReactNode;
 }
 
@@ -56,9 +57,11 @@ export function DagCanvas({
   nodeWidth = 200,
   nodeHeight = 96,
   laneLabels,
+  highlightNodeIds,
   children,
 }: Props) {
   const nodeMap = Object.fromEntries(nodes.map((n) => [n.id, n]));
+  const highlight = new Set(highlightNodeIds ?? []);
   const computed = computeBusinessDagLayout(nodeWidth, nodeHeight);
   const width = propWidth ?? computed.width;
   const height = propHeight ?? computed.height;
@@ -86,13 +89,14 @@ export function DagCanvas({
           if (!from || !to) return null;
           const nw = from.width ?? nodeWidth;
           const nh = from.height ?? nodeHeight;
+          const emphasized = highlight.size === 0 || (highlight.has(edge.from) && highlight.has(edge.to));
           return (
             <path
               key={`${edge.from}-${edge.to}`}
               d={edgePath(from, to, nw, nh)}
               fill="none"
-              stroke="rgba(15, 76, 58, 0.45)"
-              strokeWidth={2}
+              stroke={emphasized ? "rgba(15, 76, 58, 0.55)" : "rgba(15, 76, 58, 0.15)"}
+              strokeWidth={emphasized ? 2.5 : 1.5}
               strokeDasharray={edge.dashed ? "6 4" : undefined}
               markerEnd="url(#dag-arrow)"
             />

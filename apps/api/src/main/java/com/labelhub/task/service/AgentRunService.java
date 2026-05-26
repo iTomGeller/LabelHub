@@ -123,6 +123,27 @@ public class AgentRunService {
         return findCachedRun(taskId, configHash);
     }
 
+    public AgentRunResult findLatestCompleteRun(String taskId) {
+        var rows = jdbc.queryForList(
+            """
+            SELECT trace_id, status, config_hash FROM agent_runs
+            WHERE task_id = ? AND finished_at IS NOT NULL
+              AND status IN ('success', 'warning', 'partial')
+            ORDER BY finished_at DESC LIMIT 1
+            """,
+            taskId
+        );
+        if (rows.isEmpty()) return null;
+        String traceId = (String) rows.get(0).get("trace_id");
+        String status = (String) rows.get(0).get("status");
+        String configHash = (String) rows.get(0).get("config_hash");
+        List<BusinessNode> business = loadBusinessNodes(traceId);
+        List<TraceNode> developer = loadTraceNodes(traceId);
+        if (business.isEmpty()) return null;
+        TraceCompleteness completeness = evaluateCompleteness(traceId, business, developer, null);
+        return new AgentRunResult(traceId, taskId, configHash, status, true, business, developer, 0, completeness.complete(), completeness.missingNodes());
+    }
+
     public List<Map<String, Object>> listRecentRuns(int limit) {
         int safeLimit = Math.min(Math.max(limit, 1), 50);
         return jdbc.queryForList(
@@ -259,18 +280,11 @@ public class AgentRunService {
         return calls;
     }
 
-    private Map<String, Object> buildRagInfo(String ragContext, long durationMs) {
-        if (ragContext != null && !ragContext.isBlank()) {
-            return Map.of(
-                "source", "knowledge_base",
-                "hasContent", true,
-                "charCount", ragContext.length(),
-                "durationMs", durationMs,
-                "context", ragContext.length() > 300 ? ragContext.substring(0, 300) + "…" : ragContext,
-                "retrievedChunks", ragContext.lines().filter(l -> !l.isBlank()).limit(5).toList()
-            );
+    private Map<String, Object> buildRagInfo(String taskName, String instruction, String auditNode, long durationMs) {
+        if (taskName != null && !taskName.isBlank() && auditNode != null && !auditNode.isBlank()) {
+            return knowledgeBaseService.buildRagInfoMap(taskName, instruction != null ? instruction : "", auditNode, durationMs);
         }
-        return Map.of("source", "knowledge_base", "hasContent", false, "charCount", 0, "durationMs", durationMs);
+        return Map.of("source", "knowledge_base", "hasContent", false, "charCount", 0, "durationMs", durationMs, "emptyReason", "未执行检索");
     }
 
     private Map<String, Object> buildSkillInfo(List<SkillRegistryService.SkillMeta> skills,
@@ -298,14 +312,27 @@ public class AgentRunService {
         );
     }
 
+    private static final Map<String, String> BUSINESS_TO_AUDIT_NODE = Map.of(
+        "task_description", "task_context",
+        "sample_data", "dataset_sampler",
+        "annotation_template", "schema_generator",
+        "quality_rules", "rubric_generator",
+        "comprehensive_assessment", "critic",
+        "publish_readiness", "task_package_writer"
+    );
+
+    private Map<String, Object> buildRagInfoForNode(AuditRequest request, String businessNodeKey, long durationMs) {
+        String auditNode = BUSINESS_TO_AUDIT_NODE.getOrDefault(businessNodeKey, businessNodeKey);
+        return buildRagInfo(request.taskName(), request.instruction(), auditNode, durationMs);
+    }
+
     private TraceNode buildAgentExecutionNode(
             String id, String agent, String nodeKey, int sequence, String title, String status, long durationMs,
-            String ragContext, long ragDurationMs,
+            Map<String, Object> ragInfo,
             List<SkillRegistryService.SkillMeta> skills,
             List<SkillRegistryService.SkillFinding> findings,
             List<SandboxExecutionService.SandboxResult> sandboxResults,
             List<Map<String, Object>> mcpCalls) {
-        Map<String, Object> ragInfo = buildRagInfo(ragContext, ragDurationMs);
         Map<String, Object> skillInfo = buildSkillInfo(skills, findings);
         List<Map<String, Object>> tools = new ArrayList<>();
         List<Map<String, Object>> sandboxCalls = new ArrayList<>();
@@ -355,6 +382,8 @@ public class AgentRunService {
 
         List<BusinessNode> businessNodes = new ArrayList<>();
         List<TraceNode> traceNodes = new ArrayList<>();
+        boolean sentimentTask = TaskSemanticAnalyzer.isSentimentClassificationTask(request);
+        int ragEmptyCount = 0;
 
         // Node 1: Task Description Check
         String agent1 = NODE_AGENT_MAP.get("task_description");
@@ -371,17 +400,27 @@ public class AgentRunService {
         }
         long node1Duration = System.currentTimeMillis() - nodeStart;
 
+        if (ragContext1.isBlank()) ragEmptyCount++;
+
         String instrStatus = instrFindings.stream().anyMatch(f -> "high".equals(f.severity())) ? "warning" : "success";
         String instrSummary = instrFindings.isEmpty()
-            ? "任务说明清晰完整，包含明确的标注目标和判断标准"
+            ? (sentimentTask
+                ? "客服情感分类任务说明完整，定义了正面/负面/中性/混合及触发关键句、判断理由"
+                : "任务说明清晰完整，包含明确的标注目标和判断标准")
             : instrFindings.get(0).description();
-        String instrEvidence = !ragContext1.isEmpty() ? "参考知识：" + ragContext1.lines().limit(2).reduce("", (a, b) -> a + b) : "未召回业务知识，当前基于通用检查模型静态评估";
+        String instrEvidence = !ragContext1.isEmpty()
+            ? "参考标注规范知识：" + ragContext1.lines().filter(l -> l.startsWith("-")).findFirst().orElse("已命中业务知识")
+            : (sentimentTask ? "未召回标注规范，当前基于任务字段静态检查情感类别与理由要求" : "未召回业务知识，当前基于通用检查模型静态评估");
         String instrImpact = instrStatus.equals("warning") ? "说明不清晰可能导致标注员理解偏差和频繁的确认沟通，降低整体吞吐率" : "";
         String instrSuggestion = instrFindings.isEmpty() ? "建议后续根据 bad case 继续丰富边界说明" : instrFindings.get(0).suggestion();
         String ragStatus1 = ragContext1.isBlank() ? "empty" : "hit";
-        Map<String, Object> ragInfo1 = buildRagInfo(ragContext1, ragDuration1);
+        Map<String, Object> ragInfo1 = buildRagInfoForNode(request, "task_description", ragDuration1);
         Map<String, Object> skillInfo1 = buildSkillInfo(instructionSkills, instrFindings);
         Map<String, Object> calls1 = buildCallsEnvelope(ragInfo1, skillInfo1, List.of(), List.of(), List.of());
+        List<Map<String, Object>> instrEvidenceItems = new ArrayList<>(instrFindings.stream()
+            .map(f -> Map.<String, Object>of("type", "skill_finding", "label", f.skillName(), "value", f.description(), "source", "skill"))
+            .toList());
+        if (sentimentTask) instrEvidenceItems.addAll(TaskSemanticAnalyzer.instructionEvidence(request));
 
         Map<String, Object> instrDetails = buildStructuredDetails(
             agent1, "task_description", traceId, instrStatus,
@@ -395,10 +434,10 @@ public class AgentRunService {
                 Map.of("label", "说明非空", "expected", "> 0 chars", "operator", "gt")
             ),
             List.of(
-                Map.of("label", "高危 findings", "value", instrFindings.stream().filter(f -> "high".equals(f.severity())).count(), "status", instrFindings.stream().anyMatch(f -> "high".equals(f.severity())) ? "fail" : "ok"),
+                Map.of("label", "高危 findings", "value",             instrFindings.stream().filter(f -> "high".equals(f.severity())).count(), "status", instrFindings.stream().anyMatch(f -> "high".equals(f.severity())) ? "fail" : "ok"),
                 Map.of("label", "RAG 召回", "value", ragStatus1, "status", "empty".equals(ragStatus1) ? "warn" : "ok")
             ),
-            instrFindings.stream().map(f -> Map.<String, Object>of("type", "skill_finding", "label", f.skillName(), "value", f.description(), "source", "skill")).toList(),
+            instrEvidenceItems,
             calls1,
             instrStatus.equals("warning") ? "high" : "low",
             instrImpact,
@@ -409,7 +448,7 @@ public class AgentRunService {
         );
 
         businessNodes.add(new BusinessNode(traceId + "_bn_1", "task_description", "任务说明", instrStatus, instrSummary, instrEvidence, instrImpact, instrSuggestion, ragContext1.isEmpty() ? List.of() : List.of("标注规范"), "upload", node1Duration, instrDetails));
-        traceNodes.add(buildAgentExecutionNode(traceId + "_tn_1", agent1, "task_description", 1, "任务说明审核", instrStatus, node1Duration, ragContext1, ragDuration1, instructionSkills, instrFindings, List.of(), List.of()));
+        traceNodes.add(buildAgentExecutionNode(traceId + "_tn_1", agent1, "task_description", 1, "任务说明审核", instrStatus, node1Duration, ragInfo1, instructionSkills, instrFindings, List.of(), List.of()));
         recordRagMetrics(agent1, "task_description", ragContext1, ragDuration1, taskId, traceId);
         if (ragContext1.isBlank()) agentMetrics.recordRagRunEmpty(agent1, "task_description", taskId);
         recordSkillMetrics(agent1, "task_description", instructionSkills, instrFindings, taskId, traceId);
@@ -426,13 +465,21 @@ public class AgentRunService {
         long node2Duration = System.currentTimeMillis() - nodeStart;
 
         int sampleCount = request.sampleData() != null ? request.sampleData().size() : 0;
+        if (ragContext2.isBlank()) ragEmptyCount++;
         String dataStatus = dataResult.exitCode() == 0 && sampleCount >= 3 ? "success" : "warning";
-        String dataSummary = sampleCount == 0 ? "缺少样例数据" : String.format("共 %d 条样例数据，%s", sampleCount, dataResult.findings().isEmpty() ? "字段覆盖完整，数据有效" : dataResult.findings().get(0));
+        String dataSummary = sampleCount == 0 ? "缺少样例数据"
+            : (sentimentTask ? TaskSemanticAnalyzer.sampleCoverageSummary(request.sampleData())
+                : String.format("共 %d 条样例数据，%s", sampleCount, dataResult.findings().isEmpty() ? "字段覆盖完整，数据有效" : dataResult.findings().get(0)));
         String ragStatus2 = ragContext2.isBlank() ? "empty" : "hit";
-        Map<String, Object> ragInfo2 = buildRagInfo(ragContext2, ragDuration2);
+        Map<String, Object> ragInfo2 = buildRagInfoForNode(request, "sample_data", ragDuration2);
         Map<String, Object> skillInfo2 = buildSkillInfo(List.of(), List.of());
         Map<String, Object> calls2 = buildCallsEnvelope(ragInfo2, skillInfo2, List.of(), List.of(sandboxToCall(dataResult, "sandbox")), List.of());
         List<Map<String, Object>> fieldEvidence = sampleFieldNames(request.sampleData(), 8);
+        List<Map<String, Object>> dataEvidenceItems = new ArrayList<>(Stream.concat(
+            fieldEvidence.stream().map(f -> Map.<String, Object>of("type", "field", "label", f.get("label"), "value", f.get("value"), "source", "sampleData")),
+            dataResult.findings().stream().map(f -> Map.<String, Object>of("type", "sandbox_finding", "label", "finding", "value", f, "source", "dataset_check"))
+        ).toList());
+        if (sentimentTask) dataEvidenceItems.addAll(TaskSemanticAnalyzer.sampleCoverageEvidence(request.sampleData()));
 
         Map<String, Object> dataDetails = buildStructuredDetails(
             agent2, "sample_data", traceId, dataStatus,
@@ -449,10 +496,7 @@ public class AgentRunService {
                 Map.of("label", "沙盒 exitCode", "value", dataResult.exitCode(), "status", dataResult.exitCode() == 0 ? "ok" : "fail"),
                 Map.of("label", "RAG 召回", "value", ragStatus2, "status", "empty".equals(ragStatus2) ? "warn" : "ok")
             ),
-            Stream.concat(
-                fieldEvidence.stream().map(f -> Map.<String, Object>of("type", "field", "label", f.get("label"), "value", f.get("value"), "source", "sampleData")),
-                dataResult.findings().stream().map(f -> Map.<String, Object>of("type", "sandbox_finding", "label", "finding", "value", f, "source", "dataset_check"))
-            ).toList(),
+            dataEvidenceItems,
             calls2,
             dataStatus.equals("warning") ? "high" : "low",
             dataStatus.equals("warning") ? "样例不足会导致后续无法为 AI/标注员提供有效的 Few-Shot 提示，影响启动准确率" : "",
@@ -463,7 +507,7 @@ public class AgentRunService {
         );
 
         businessNodes.add(new BusinessNode(traceId + "_bn_2", "sample_data", "样例数据", dataStatus, dataSummary, ragContext2.isEmpty() ? "通过配置校验器直接检查" : "参考数据规范", dataStatus.equals("warning") ? "数据不足可能影响 AI 生成质量" : "", dataResult.findings().isEmpty() ? "" : "补充更多样例或修复空字段", ragContext2.isEmpty() ? List.of() : List.of("数据规范"), "upload", node2Duration, dataDetails));
-        traceNodes.add(buildAgentExecutionNode(traceId + "_tn_2", agent2, "sample_data", 2, "样例数据校验", dataStatus, node2Duration, ragContext2, ragDuration2, List.of(), List.of(), List.of(dataResult), List.of()));
+        traceNodes.add(buildAgentExecutionNode(traceId + "_tn_2", agent2, "sample_data", 2, "样例数据校验", dataStatus, node2Duration, ragInfo2, List.of(), List.of(), List.of(dataResult), List.of()));
         recordRagMetrics(agent2, "sample_data", ragContext2, ragDuration2, taskId, traceId);
         if (ragContext2.isBlank()) agentMetrics.recordRagRunEmpty(agent2, "sample_data", taskId);
         recordSandboxMetrics(agent2, "sample_data", dataResult, taskId, traceId);
@@ -487,13 +531,21 @@ public class AgentRunService {
         long node3Duration = System.currentTimeMillis() - nodeStart;
 
         int compCount = request.schemaComponents() != null ? request.schemaComponents().size() : 0;
+        if (ragContext3.isBlank()) ragEmptyCount++;
         String schemaStatus = schemaResult.exitCode() == 0 && compCount > 0 && schemaFindings.stream().noneMatch(f -> "high".equals(f.severity())) ? "success" : "warning";
-        String schemaSummary = compCount == 0 ? "缺少标注模板组件" : String.format("%d 个标注组件，%s", compCount, schemaResult.findings().isEmpty() ? "与样例映射正确" : schemaResult.findings().get(0));
+        String schemaSummary = compCount == 0 ? "缺少标注模板组件"
+            : (sentimentTask ? TaskSemanticAnalyzer.schemaSentimentSummary(request.schemaComponents())
+                : String.format("%d 个标注组件，%s", compCount, schemaResult.findings().isEmpty() ? "与样例映射正确" : schemaResult.findings().get(0)));
         String ragStatus3 = ragContext3.isBlank() ? "empty" : "hit";
         List<Map<String, Object>> compEvidence = schemaComponentEvidence(request.schemaComponents());
-        Map<String, Object> ragInfo3 = buildRagInfo(ragContext3, ragDuration3);
+        Map<String, Object> ragInfo3 = buildRagInfoForNode(request, "annotation_template", ragDuration3);
         Map<String, Object> skillInfo3 = buildSkillInfo(schemaSkills, schemaFindings);
         Map<String, Object> calls3 = buildCallsEnvelope(ragInfo3, skillInfo3, List.of(sandboxToCall(schemaResult, "tool")), List.of(), List.of());
+        List<Map<String, Object>> schemaEvidenceItems = new ArrayList<>(Stream.concat(
+            compEvidence.stream(),
+            schemaFindings.stream().map(f -> Map.<String, Object>of("type", "skill_finding", "label", f.skillName(), "value", f.description(), "source", "skill"))
+        ).toList());
+        if (sentimentTask) schemaEvidenceItems.addAll(TaskSemanticAnalyzer.schemaSentimentEvidence(request.schemaComponents()));
 
         Map<String, Object> schemaDetails = buildStructuredDetails(
             agent3, "annotation_template", traceId, schemaStatus,
@@ -510,10 +562,7 @@ public class AgentRunService {
                 Map.of("label", "沙盒 exitCode", "value", schemaResult.exitCode(), "status", schemaResult.exitCode() == 0 ? "ok" : "fail"),
                 Map.of("label", "RAG 召回", "value", ragStatus3, "status", "empty".equals(ragStatus3) ? "warn" : "ok")
             ),
-            Stream.concat(
-                compEvidence.stream(),
-                schemaFindings.stream().map(f -> Map.<String, Object>of("type", "skill_finding", "label", f.skillName(), "value", f.description(), "source", "skill"))
-            ).toList(),
+            schemaEvidenceItems,
             calls3,
             schemaStatus.equals("warning") ? "high" : "low",
             schemaStatus.equals("warning") ? "模板残缺或字段未映射会导致标注页无法正确渲染表单，前端无法收集结果" : "",
@@ -524,7 +573,7 @@ public class AgentRunService {
         );
 
         businessNodes.add(new BusinessNode(traceId + "_bn_3", "annotation_template", "标注模板", schemaStatus, schemaSummary, ragContext3.isEmpty() ? "基于通用组件规范" : "参考模板规范", schemaStatus.equals("warning") ? "模板不完整会导致标注员无法正确提交" : "", schemaFindings.isEmpty() ? "" : schemaFindings.get(0).suggestion(), ragContext3.isEmpty() ? List.of() : List.of("模板规范"), "template", node3Duration, schemaDetails));
-        traceNodes.add(buildAgentExecutionNode(traceId + "_tn_3", agent3, "annotation_template", 3, "标注模板校验", schemaStatus, node3Duration, ragContext3, ragDuration3, schemaSkills, schemaFindings, List.of(schemaResult), List.of()));
+        traceNodes.add(buildAgentExecutionNode(traceId + "_tn_3", agent3, "annotation_template", 3, "标注模板校验", schemaStatus, node3Duration, ragInfo3, schemaSkills, schemaFindings, List.of(schemaResult), List.of()));
         recordRagMetrics(agent3, "annotation_template", ragContext3, ragDuration3, taskId, traceId);
         if (ragContext3.isBlank()) agentMetrics.recordRagRunEmpty(agent3, "annotation_template", taskId);
         recordSkillMetrics(agent3, "annotation_template", schemaSkills, schemaFindings, taskId, traceId);
@@ -542,13 +591,21 @@ public class AgentRunService {
         long node4Duration = System.currentTimeMillis() - nodeStart;
 
         int ruleCount = request.rubricRules() != null ? request.rubricRules().size() : 0;
+        if (ragContext4.isBlank()) ragEmptyCount++;
         String rubricStatus = rubricResult.exitCode() == 0 && ruleCount > 0 ? "success" : "warning";
-        String rubricSummary = ruleCount == 0 ? "缺少质检规则" : String.format("%d 条质检规则，%s", ruleCount, rubricResult.findings().isEmpty() ? "已覆盖目标维度" : rubricResult.findings().get(0));
+        String rubricSummary = ruleCount == 0 ? "缺少质检规则"
+            : (sentimentTask ? String.format("%d 条规则，覆盖原文引用/不得臆测/混合情感等情感分类质检要点", ruleCount)
+                : String.format("%d 条质检规则，%s", ruleCount, rubricResult.findings().isEmpty() ? "已覆盖目标维度" : rubricResult.findings().get(0)));
         String ragStatus4 = ragContext4.isBlank() ? "empty" : "hit";
         List<Map<String, Object>> ruleEvidence = rubricRuleEvidence(request.rubricRules());
-        Map<String, Object> ragInfo4 = buildRagInfo(ragContext4, ragDuration4);
+        Map<String, Object> ragInfo4 = buildRagInfoForNode(request, "quality_rules", ragDuration4);
         Map<String, Object> skillInfo4 = buildSkillInfo(List.of(), List.of());
         Map<String, Object> calls4 = buildCallsEnvelope(ragInfo4, skillInfo4, List.of(sandboxToCall(rubricResult, "tool")), List.of(), List.of());
+        List<Map<String, Object>> rubricEvidenceItems = new ArrayList<>(Stream.concat(
+            ruleEvidence.stream(),
+            rubricResult.findings().stream().map(f -> Map.<String, Object>of("type", "sandbox_finding", "label", "finding", "value", f, "source", "rubric_check"))
+        ).toList());
+        if (sentimentTask) rubricEvidenceItems.addAll(TaskSemanticAnalyzer.rubricSentimentEvidence(request.rubricRules()));
 
         Map<String, Object> rubricDetails = buildStructuredDetails(
             agent4, "quality_rules", traceId, rubricStatus,
@@ -565,10 +622,7 @@ public class AgentRunService {
                 Map.of("label", "沙盒 exitCode", "value", rubricResult.exitCode(), "status", rubricResult.exitCode() == 0 ? "ok" : "fail"),
                 Map.of("label", "RAG 召回", "value", ragStatus4, "status", "empty".equals(ragStatus4) ? "warn" : "ok")
             ),
-            Stream.concat(
-                ruleEvidence.stream(),
-                rubricResult.findings().stream().map(f -> Map.<String, Object>of("type", "sandbox_finding", "label", "finding", "value", f, "source", "rubric_check"))
-            ).toList(),
+            rubricEvidenceItems,
             calls4,
             rubricStatus.equals("warning") ? "high" : "low",
             rubricStatus.equals("warning") ? "缺乏量化的规则会导致机器和人工质检都失去标准，模型预标注的质量无法评估" : "",
@@ -579,7 +633,7 @@ public class AgentRunService {
         );
 
         businessNodes.add(new BusinessNode(traceId + "_bn_4", "quality_rules", "质检规则", rubricStatus, rubricSummary, ragContext4.isEmpty() ? "通用规则检查" : "参考质检规范", rubricStatus.equals("warning") ? "缺少规则可能导致审核无标准" : "", rubricResult.findings().isEmpty() ? "" : "补充质检规则和评分维度", ragContext4.isEmpty() ? List.of() : List.of("质检规则"), "rules", node4Duration, rubricDetails));
-        traceNodes.add(buildAgentExecutionNode(traceId + "_tn_4", agent4, "quality_rules", 4, "质检规则校验", rubricStatus, node4Duration, ragContext4, ragDuration4, List.of(), List.of(), List.of(rubricResult), List.of()));
+        traceNodes.add(buildAgentExecutionNode(traceId + "_tn_4", agent4, "quality_rules", 4, "质检规则校验", rubricStatus, node4Duration, ragInfo4, List.of(), List.of(), List.of(rubricResult), List.of()));
         recordRagMetrics(agent4, "quality_rules", ragContext4, ragDuration4, taskId, traceId);
         if (ragContext4.isBlank()) agentMetrics.recordRagRunEmpty(agent4, "quality_rules", taskId);
         recordSandboxMetrics(agent4, "quality_rules", rubricResult, taskId, traceId);
@@ -592,15 +646,16 @@ public class AgentRunService {
         long ragStart5 = System.currentTimeMillis();
         String ragContext5 = knowledgeBaseService.buildRagContextForNode(request.taskName(), request.instruction(), "critic");
         long ragDuration5 = System.currentTimeMillis() - ragStart5;
+        if (ragContext5.isBlank()) ragEmptyCount++;
         boolean hasAll = compCount > 0 && ruleCount > 0 && sampleCount >= 3;
         long node5Duration = System.currentTimeMillis() - nodeStart;
 
-        String assessStatus = hasAll ? "success" : "warning";
-        String assessSummary = hasAll ? "上游各子项校验通过，整体可流转" : "关键检查未通过，请修复后再发";
         List<String> issues = new ArrayList<>();
         if (compCount == 0) issues.add("缺少标注模板");
         if (ruleCount == 0) issues.add("缺少质检规则");
         if (sampleCount < 3) issues.add("样例不足 3 条");
+        String assessStatus = hasAll ? "success" : "warning";
+        String assessSummary = TaskSemanticAnalyzer.assessmentSentimentSummary(request, hasAll, ragEmptyCount, issues);
         String ragStatus5 = ragContext5.isBlank() ? "empty" : "hit";
         List<Map<String, Object>> depMatrix = List.of(
             Map.of("label", "task_description", "value", instrStatus, "status", "success".equals(instrStatus) ? "ok" : "fail"),
@@ -608,7 +663,7 @@ public class AgentRunService {
             Map.of("label", "annotation_template", "value", schemaStatus, "status", "success".equals(schemaStatus) ? "ok" : "fail"),
             Map.of("label", "quality_rules", "value", rubricStatus, "status", "success".equals(rubricStatus) ? "ok" : "fail")
         );
-        Map<String, Object> ragInfo5 = buildRagInfo(ragContext5, ragDuration5);
+        Map<String, Object> ragInfo5 = buildRagInfoForNode(request, "comprehensive_assessment", ragDuration5);
         Map<String, Object> skillInfo5 = buildSkillInfo(List.of(), List.of());
         Map<String, Object> calls5 = buildCallsEnvelope(ragInfo5, skillInfo5, List.of(), List.of(), List.of());
 
@@ -628,7 +683,7 @@ public class AgentRunService {
         );
 
         businessNodes.add(new BusinessNode(traceId + "_bn_5", "comprehensive_assessment", "综合评估", assessStatus, assessSummary, ragContext5.isEmpty() ? "静态聚合" : "参考评分标准", hasAll ? "" : "不完整的配置可能影响标注质量和效率", issues.isEmpty() ? "" : "修复: " + String.join("、", issues), ragContext5.isEmpty() ? List.of() : List.of("项目要求"), "publish", node5Duration, assessDetails));
-        traceNodes.add(buildAgentExecutionNode(traceId + "_tn_5", agent5, "comprehensive_assessment", 5, "综合评估", assessStatus, node5Duration, ragContext5, ragDuration5, List.of(), List.of(), List.of(), List.of()));
+        traceNodes.add(buildAgentExecutionNode(traceId + "_tn_5", agent5, "comprehensive_assessment", 5, "综合评估", assessStatus, node5Duration, ragInfo5, List.of(), List.of(), List.of(), List.of()));
         recordRagMetrics(agent5, "comprehensive_assessment", ragContext5, ragDuration5, taskId, traceId);
         if (ragContext5.isBlank()) agentMetrics.recordRagRunEmpty(agent5, "comprehensive_assessment", taskId);
         recordExecutionMetrics(agent5, "comprehensive_assessment", assessStatus, taskId, traceId);
@@ -658,7 +713,8 @@ public class AgentRunService {
             mcpProbeResults.add(Map.of("server", server.name(), "status", mcpStatus));
         }
 
-        Map<String, Object> calls6 = buildCallsEnvelope(buildRagInfo("", 0), buildSkillInfo(List.of(), List.of()), List.of(sandboxToCall(pkgResult, "tool")), List.of(), mcpProbeResults);
+        Map<String, Object> ragInfo6 = buildRagInfo(request.taskName(), request.instruction(), "task_package_writer", 0);
+        Map<String, Object> calls6 = buildCallsEnvelope(ragInfo6, buildSkillInfo(List.of(), List.of()), List.of(sandboxToCall(pkgResult, "tool")), List.of(), mcpProbeResults);
 
         Map<String, Object> pkgDetails = buildStructuredDetails(
             agent6, "publish_readiness", traceId, pkgStatus,
@@ -689,7 +745,7 @@ public class AgentRunService {
         );
 
         businessNodes.add(new BusinessNode(traceId + "_bn_6", "publish_readiness", "发布准备", pkgStatus, pkgSummary, "下游 API 契约协议", pkgStatus.equals("warning") ? "不完整的任务包无法被 B/C 模块正确消费" : "", pkgResult.findings().isEmpty() ? "" : pkgResult.findings().get(0), List.of(), "publish", node6Duration, pkgDetails));
-        traceNodes.add(buildAgentExecutionNode(traceId + "_tn_6", agent6, "publish_readiness", 6, "发布准备校验", pkgStatus, node6Duration, "", 0, List.of(), List.of(), List.of(pkgResult), mcpProbeResults));
+        traceNodes.add(buildAgentExecutionNode(traceId + "_tn_6", agent6, "publish_readiness", 6, "发布准备校验", pkgStatus, node6Duration, ragInfo6, List.of(), List.of(), List.of(pkgResult), mcpProbeResults));
         recordSandboxMetrics(agent6, "publish_readiness", pkgResult, taskId, traceId);
         recordExecutionMetrics(agent6, "publish_readiness", pkgStatus, taskId, traceId);
         agentMetrics.recordAuditNodeDuration("publish_readiness", "agent_execution", node6Duration);

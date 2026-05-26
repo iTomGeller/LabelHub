@@ -38,6 +38,13 @@ public class KnowledgeBaseController {
         return ResponseEntity.ok(knowledgeBaseService.listDocuments());
     }
 
+    @PostMapping("/seed")
+    public ResponseEntity<KnowledgeBaseService.SeedInitResult> seedDocuments(
+        @RequestParam(defaultValue = "false") boolean force
+    ) {
+        return ResponseEntity.ok(knowledgeBaseService.seedDefaultKnowledge(force));
+    }
+
     public record RetrieveRequest(String query, String auditNode, Integer topK) {}
 
     @PostMapping("/retrieve")
