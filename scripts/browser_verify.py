@@ -186,20 +186,39 @@ def check_trace_page():
     return "trace page ok"
 
 
-def check_trace_detail_markup():
+def check_trace_detail_api():
     status, runs_raw = fetch("/agent-api/agents/audit-runs/recent?limit=1")
     if status != 200:
         raise AssertionError(f"recent runs HTTP {status}")
     runs = json.loads(runs_raw)
     if not runs:
-        return "no recent trace to inspect markup"
+        return "no recent trace to inspect"
     trace_id = runs[0].get("trace_id")
-    _, html = fetch(f"/?view=trace&traceId={quote(trace_id)}")
-    markers = ["输入输出", "为什么调用", "输入", "输出"]
-    found = sum(1 for m in markers if m in html)
-    if found < 2:
-        raise AssertionError(f"trace detail page missing io markers, found {found}/4")
-    return f"trace detail ok traceId={trace_id}, markers={found}"
+    status, raw = fetch(f"/agent-api/agents/audit-runs/{trace_id}")
+    if status != 200:
+        raise AssertionError(f"trace detail HTTP {status}")
+    data = json.loads(raw)
+    dev = data.get("developerDag") or []
+    if not dev:
+        raise AssertionError("developerDag empty")
+    io_ok = 0
+    span_io = 0
+    for tn in dev:
+        if tn.get("type") != "agent_execution":
+            continue
+        if tn.get("inputPreview") and tn.get("outputPreview"):
+            io_ok += 1
+        calls = ((tn.get("outputPreview") or {}).get("calls") or {})
+        for span in calls.get("spans") or []:
+            if span.get("inputPreview") and span.get("outputPreview"):
+                span_io += 1
+            if span.get("whyCalled"):
+                pass
+    if io_ok < 6:
+        raise AssertionError(f"expected 6 agent input/output previews, got {io_ok}")
+    if span_io < 10:
+        raise AssertionError(f"expected >=10 span io previews, got {span_io}")
+    return f"traceId={trace_id}, agentIo={io_ok}, spanIo={span_io}"
 
 
 def main():
@@ -219,7 +238,7 @@ def main():
     run("task_text_cls_001 audit semantic + spans", check_task_text_cls_audit)
     run("web publish task_text_cls_001", check_web_publish_task_text_cls)
     run("trace page", check_trace_page)
-    run("trace detail io markup", check_trace_detail_markup)
+    run("trace detail io api", check_trace_detail_api)
 
     print(f"\n产品验收: {sum(checks)}/{len(checks)} 通过")
     sys.exit(0 if all(checks) else 1)
