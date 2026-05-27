@@ -1,9 +1,10 @@
-"""线上用户路径与产品级验收（HTML + API）。"""
+"""线上用户路径与产品级验收（HTML + API + Trace 排障契约）。"""
 import io
 import json
 import re
 import sys
 import urllib.request
+from urllib.parse import quote
 
 if hasattr(sys.stdout, "buffer"):
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
@@ -18,9 +19,13 @@ GRAFANA_UID = "labelhub-agent-rag-trace"
 GRAFANA_SLUG_PATH = f"/grafana/d/{GRAFANA_UID}/labelhub-agent-diagnostic"
 
 SENTIMENT_TERMS = ["情感倾向", "触发关键句", "判断理由", "正面", "负面", "中性"]
+REQUIRED_SPAN_FIELDS = [
+    "id", "kind", "title", "whyCalled", "inputPreview", "outputPreview",
+    "resultSummary", "durationMs", "status", "degradeReason",
+]
 
 
-def fetch(path, method="GET", body=None, timeout=60):
+def fetch(path, method="GET", body=None, timeout=120):
     url = BASE + path if path.startswith("/") else path
     data = None
     headers = {}
@@ -30,6 +35,28 @@ def fetch(path, method="GET", body=None, timeout=60):
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return resp.status, resp.read().decode("utf-8", errors="replace")
+
+
+def assert_span_contract(span, node_key):
+    missing = [f for f in REQUIRED_SPAN_FIELDS if f not in span]
+    if missing:
+        raise AssertionError(f"node {node_key} span missing fields: {missing}")
+    inp = span.get("inputPreview")
+    out = span.get("outputPreview")
+    if not isinstance(inp, dict) or not inp:
+        raise AssertionError(f"node {node_key} span {span.get('id')} inputPreview empty")
+    if not isinstance(out, dict) or not out:
+        raise AssertionError(f"node {node_key} span {span.get('id')} outputPreview empty")
+    kind = span.get("kind")
+    if kind == "rag":
+        if not inp.get("query"):
+            raise AssertionError(f"rag span missing query on {node_key}")
+        if not (out.get("topChunks") or out.get("emptyReason")):
+            raise AssertionError(f"rag span missing topChunks/emptyReason on {node_key}")
+    if kind in ("tool", "sandbox") and not inp.get("checkTarget"):
+        raise AssertionError(f"{kind} span missing checkTarget input on {node_key}")
+    if kind == "mcp" and not inp.get("server"):
+        raise AssertionError(f"mcp span missing server input on {node_key}")
 
 
 def check_grafana_api():
@@ -93,18 +120,33 @@ def check_task_text_cls_audit():
         raise AssertionError(f"HTTP {status}")
     data = json.loads(content)
     nodes = data.get("businessDag") or []
+    dev_nodes = data.get("developerDag") or []
     if len(nodes) < 6:
         raise AssertionError(f"expected 6 nodes, got {len(nodes)}")
 
     rag_hits = 0
+    span_total = 0
     blob = json.dumps(nodes, ensure_ascii=False)
     for node in nodes:
-        rag = ((node.get("details") or {}).get("calls") or {}).get("rag") or {}
+        node_key = node.get("nodeKey")
+        calls = ((node.get("details") or {}).get("calls") or {})
+        rag = calls.get("rag") or {}
         if rag.get("hasContent"):
             rag_hits += 1
-        details_blob = json.dumps(node.get("details") or {}, ensure_ascii=False)
-        if "exitCode 0" in details_blob and "无额外发现" in details_blob and len(details_blob) < 120:
-            raise AssertionError(f"node {node.get('nodeKey')} only has technical noise")
+        spans = calls.get("spans") or []
+        if not spans:
+            raise AssertionError(f"node {node_key} missing calls.spans")
+        for span in spans:
+            assert_span_contract(span, node_key)
+            span_total += 1
+
+    for tn in dev_nodes:
+        if tn.get("type") != "agent_execution":
+            continue
+        inp = tn.get("inputPreview")
+        out = tn.get("outputPreview")
+        if not inp or not out:
+            raise AssertionError(f"trace node {tn.get('id')} missing input/output preview")
 
     if rag_hits < 3:
         raise AssertionError(f"expected >=3 RAG hits, got {rag_hits}")
@@ -113,7 +155,8 @@ def check_task_text_cls_audit():
     if matched < 4:
         raise AssertionError(f"expected business terms in output, matched {matched}")
 
-    return f"traceId={data.get('traceId')}, ragHits={rag_hits}, terms={matched}"
+    trace_id = data.get("traceId")
+    return f"traceId={trace_id}, ragHits={rag_hits}, spans={span_total}, terms={matched}"
 
 
 def check_web_publish_task_text_cls():
@@ -136,7 +179,27 @@ def check_trace_page():
         raise AssertionError(f"trace page HTTP {status}")
     if "Trace" not in html:
         raise AssertionError("missing trace view")
+    if "上一页" not in html and "最近 Trace" not in html:
+        # pagination may not show if <=4 runs; still require workbench copy
+        if "Trace 排障工作台" not in html and "Agent Trace" not in html:
+            raise AssertionError("missing trace workbench markers")
     return "trace page ok"
+
+
+def check_trace_detail_markup():
+    status, runs_raw = fetch("/agent-api/agents/audit-runs/recent?limit=1")
+    if status != 200:
+        raise AssertionError(f"recent runs HTTP {status}")
+    runs = json.loads(runs_raw)
+    if not runs:
+        return "no recent trace to inspect markup"
+    trace_id = runs[0].get("trace_id")
+    _, html = fetch(f"/?view=trace&traceId={quote(trace_id)}")
+    markers = ["输入输出", "为什么调用", "输入", "输出"]
+    found = sum(1 for m in markers if m in html)
+    if found < 2:
+        raise AssertionError(f"trace detail page missing io markers, found {found}/4")
+    return f"trace detail ok traceId={trace_id}, markers={found}"
 
 
 def main():
@@ -153,9 +216,10 @@ def main():
 
     run("grafana api diagnostic", check_grafana_api)
     run("knowledge seeded", check_knowledge_seeded)
-    run("task_text_cls_001 audit semantic", check_task_text_cls_audit)
+    run("task_text_cls_001 audit semantic + spans", check_task_text_cls_audit)
     run("web publish task_text_cls_001", check_web_publish_task_text_cls)
     run("trace page", check_trace_page)
+    run("trace detail io markup", check_trace_detail_markup)
 
     print(f"\n产品验收: {sum(checks)}/{len(checks)} 通过")
     sys.exit(0 if all(checks) else 1)

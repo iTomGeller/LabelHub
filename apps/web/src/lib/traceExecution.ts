@@ -37,6 +37,7 @@ export interface AgentExecutionGroup {
     tools?: Record<string, unknown>[];
     sandbox?: Record<string, unknown>[];
     mcp?: Record<string, unknown>[];
+    spans?: Record<string, unknown>[];
   };
   raw?: TraceNode;
 }

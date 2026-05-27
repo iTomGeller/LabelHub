@@ -17,7 +17,10 @@ public class SandboxExecutionService {
         this.jdbc = jdbc;
     }
 
-    public record SandboxResult(String toolName, String status, int exitCode, List<String> findings, long durationMs, String stdout) {}
+    public record SandboxResult(
+        String toolName, String status, int exitCode, List<String> findings, long durationMs, String stdout,
+        Map<String, Object> inputPreview, Map<String, Object> outputPreview
+    ) {}
 
     public SandboxResult executeSchemaCheck(String traceId, List<Map<String, Object>> components) {
         long start = System.currentTimeMillis();
@@ -50,7 +53,16 @@ public class SandboxExecutionService {
         String stdout = findings.isEmpty() ? "All schema components valid" : String.join("\n", findings);
 
         persistExecution(traceId, "schema_contract_checker", exitCode, stdout, "", duration, status);
-        return new SandboxResult("schema_contract_checker", status, exitCode, findings, duration, stdout);
+        Map<String, Object> inputPreview = Map.of(
+            "checkTarget", "schemaComponents",
+            "componentCount", components.size(),
+            "componentIds", components.stream().map(c -> String.valueOf(c.getOrDefault("id", "?"))).limit(8).toList()
+        );
+        Map<String, Object> outputPreview = new LinkedHashMap<>();
+        outputPreview.put("exitCode", exitCode);
+        outputPreview.put("findings", findings);
+        outputPreview.put("stdoutPreview", stdout.length() > 200 ? stdout.substring(0, 200) + "…" : stdout);
+        return new SandboxResult("schema_contract_checker", status, exitCode, findings, duration, stdout, inputPreview, outputPreview);
     }
 
     public SandboxResult executeRubricCheck(String traceId, List<Map<String, Object>> rules, List<String> dimensions) {
@@ -83,7 +95,18 @@ public class SandboxExecutionService {
         String stdout = findings.isEmpty() ? "All rubric rules valid" : String.join("\n", findings);
 
         persistExecution(traceId, "rubric_contract_checker", exitCode, stdout, "", duration, status);
-        return new SandboxResult("rubric_contract_checker", status, exitCode, findings, duration, stdout);
+        Map<String, Object> inputPreview = Map.of(
+            "checkTarget", "rubricRules",
+            "ruleCount", rules.size(),
+            "ruleIds", rules.stream().map(r -> String.valueOf(r.getOrDefault("ruleId", "?"))).limit(8).toList(),
+            "dimensionCount", dimensions.size(),
+            "dimensions", dimensions.stream().limit(6).toList()
+        );
+        Map<String, Object> outputPreview = new LinkedHashMap<>();
+        outputPreview.put("exitCode", exitCode);
+        outputPreview.put("findings", findings);
+        outputPreview.put("stdoutPreview", stdout.length() > 200 ? stdout.substring(0, 200) + "…" : stdout);
+        return new SandboxResult("rubric_contract_checker", status, exitCode, findings, duration, stdout, inputPreview, outputPreview);
     }
 
     public SandboxResult executeDatasetCheck(String traceId, List<Map<String, Object>> sampleData) {
@@ -126,7 +149,27 @@ public class SandboxExecutionService {
         String stdout = findings.isEmpty() ? "Dataset validation passed" : String.join("\n", findings);
 
         persistExecution(traceId, "dataset_profile_checker", exitCode, stdout, "", duration, status);
-        return new SandboxResult("dataset_profile_checker", status, exitCode, findings, duration, stdout);
+        List<String> fieldNames = new ArrayList<>();
+        if (!sampleData.isEmpty()) {
+            Set<String> keys = new LinkedHashSet<>();
+            for (var row : sampleData) keys.addAll(row.keySet());
+            fieldNames.addAll(keys.stream().limit(8).toList());
+        }
+        Map<String, Object> inputPreview = Map.of(
+            "checkTarget", "sampleData",
+            "rowCount", sampleData.size(),
+            "fields", fieldNames,
+            "samplePreview", sampleData.stream().limit(2).map(r -> {
+                Map<String, Object> preview = new LinkedHashMap<>();
+                r.forEach((k, v) -> preview.put(k, v != null && v.toString().length() > 60 ? v.toString().substring(0, 60) + "…" : v));
+                return preview;
+            }).toList()
+        );
+        Map<String, Object> outputPreview = new LinkedHashMap<>();
+        outputPreview.put("exitCode", exitCode);
+        outputPreview.put("findings", findings);
+        outputPreview.put("stdoutPreview", stdout.length() > 200 ? stdout.substring(0, 200) + "…" : stdout);
+        return new SandboxResult("dataset_profile_checker", status, exitCode, findings, duration, stdout, inputPreview, outputPreview);
     }
 
     public SandboxResult executePromptBudgetCheck(String traceId, String prompt, int ragChunkCount) {
@@ -147,7 +190,17 @@ public class SandboxExecutionService {
         String stdout = findings.isEmpty() ? "Prompt budget within limits" : String.join("\n", findings);
 
         persistExecution(traceId, "prompt_budget_checker", exitCode, stdout, "", duration, status);
-        return new SandboxResult("prompt_budget_checker", status, exitCode, findings, duration, stdout);
+        Map<String, Object> inputPreview = Map.of(
+            "checkTarget", "promptBudget",
+            "promptLength", prompt != null ? prompt.length() : 0,
+            "ragChunkCount", ragChunkCount
+        );
+        Map<String, Object> outputPreview = Map.of(
+            "exitCode", exitCode,
+            "findings", findings,
+            "stdoutPreview", stdout.length() > 200 ? stdout.substring(0, 200) + "…" : stdout
+        );
+        return new SandboxResult("prompt_budget_checker", status, exitCode, findings, duration, stdout, inputPreview, outputPreview);
     }
 
     public SandboxResult executePackageCheck(String traceId, Map<String, Object> taskPackage) {
@@ -168,7 +221,18 @@ public class SandboxExecutionService {
         String stdout = findings.isEmpty() ? "Package export check passed" : String.join("\n", findings);
 
         persistExecution(traceId, "package_export_checker", exitCode, stdout, "", duration, status);
-        return new SandboxResult("package_export_checker", status, exitCode, findings, duration, stdout);
+        Map<String, Object> inputPreview = Map.of(
+            "checkTarget", "taskPackage",
+            "taskId", String.valueOf(taskPackage.getOrDefault("taskId", "")),
+            "taskName", String.valueOf(taskPackage.getOrDefault("taskName", "")),
+            "schemaComponentCount", taskPackage.get("schemaComponents") instanceof List<?> sc ? sc.size() : 0,
+            "rubricRuleCount", taskPackage.get("rubricRules") instanceof List<?> rr ? rr.size() : 0
+        );
+        Map<String, Object> outputPreview = new LinkedHashMap<>();
+        outputPreview.put("exitCode", exitCode);
+        outputPreview.put("findings", findings);
+        outputPreview.put("stdoutPreview", stdout.length() > 200 ? stdout.substring(0, 200) + "…" : stdout);
+        return new SandboxResult("package_export_checker", status, exitCode, findings, duration, stdout, inputPreview, outputPreview);
     }
 
     private void persistExecution(String traceId, String toolName, int exitCode, String stdout, String stderr, long durationMs, String status) {

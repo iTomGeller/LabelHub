@@ -1,0 +1,34 @@
+{
+  "description": "Pre-fix failure baseline for trace-dag-ux-real-fix acceptance",
+  "knownIssues": [
+    "business DAG lane labels overlap canvas (no gutter)",
+    "trace node inputPreview is null for all agent_execution nodes",
+    "calls envelope lacks spans[] with inputPreview/outputPreview",
+    "sandbox calls only expose tool name and exitCode",
+    "MCP probes only show server/status without input or error detail",
+    "evidence and span lists have no pagination in UI",
+    "edge routing uses bottom-top center only causing misalignment on parallel rank"
+  ],
+  "requiredSpanFields": [
+    "id",
+    "kind",
+    "title",
+    "whyCalled",
+    "inputPreview",
+    "outputPreview",
+    "resultSummary",
+    "durationMs",
+    "status",
+    "degradeReason"
+  ],
+  "requiredRagInputFields": ["query", "auditNode", "category"],
+  "requiredRagOutputFields": ["topChunks", "emptyReason", "hitCount", "charCount"],
+  "requiredTraceNodeFields": ["inputPreview", "outputPreview"],
+  "paginationLimits": {
+    "evidencePerPage": 5,
+    "callSpansPerPage": 3,
+    "traceSpansPerPage": 4,
+    "recentTracesPerPage": 4,
+    "jsonLinesPerPage": 80
+  }
+}

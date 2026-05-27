@@ -28,7 +28,10 @@ public class SkillRegistryService {
 
     public record SkillMeta(String id, String name, String version, String description, List<String> triggers, String rules, String filePath) {}
     public record SkillFinding(String skillName, String severity, String description, String evidence, String suggestion) {}
-    public record SkillExecutionResult(String skillName, String status, List<SkillFinding> findings, long durationMs) {}
+    public record SkillExecutionResult(
+        String skillName, String status, List<SkillFinding> findings, long durationMs,
+        Map<String, Object> inputPreview, Map<String, Object> outputPreview, String whyCalled
+    ) {}
 
     @PostConstruct
     public void scanSkills() {
@@ -135,7 +138,33 @@ public class SkillRegistryService {
 
         long duration = System.currentTimeMillis() - start;
         String status = findings.stream().anyMatch(f -> "high".equals(f.severity()) || "critical".equals(f.severity())) ? "warning" : "success";
-        return new SkillExecutionResult(skill.name(), status, findings, duration);
+
+        Map<String, Object> inputPreview = new LinkedHashMap<>();
+        inputPreview.put("skillName", skill.name());
+        inputPreview.put("taskName", taskName);
+        inputPreview.put("instructionPreview", instruction.length() > 120 ? instruction.substring(0, 120) + "…" : instruction);
+        inputPreview.put("componentCount", components.size());
+        inputPreview.put("ruleCount", rules.size());
+        inputPreview.put("sampleCount", sampleData.size());
+
+        Map<String, Object> outputPreview = new LinkedHashMap<>();
+        outputPreview.put("findingCount", findings.size());
+        outputPreview.put("findings", findings.stream().map(f -> Map.of(
+            "severity", f.severity(),
+            "description", f.description(),
+            "suggestion", f.suggestion() != null ? f.suggestion() : ""
+        )).toList());
+        outputPreview.put("status", status);
+
+        String whyCalled = switch (skill.name()) {
+            case "instruction-refine" -> "检查任务说明是否包含标注目标与边界说明";
+            case "task-schema-builder" -> "校验标注组件 dataPath 与必填校验规则";
+            case "dataset-profile" -> "分析样例数据字段覆盖与空值分布";
+            case "design-enterprise" -> "检查质检规则严重级别与维度覆盖";
+            default -> "执行技能「" + skill.name() + "」进行静态规则检查";
+        };
+
+        return new SkillExecutionResult(skill.name(), status, findings, duration, inputPreview, outputPreview, whyCalled);
     }
 
     public List<SkillMeta> getAllSkills() {

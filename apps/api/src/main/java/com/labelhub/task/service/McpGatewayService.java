@@ -47,13 +47,48 @@ public class McpGatewayService {
             return recordAndReturn(traceId, serverName, toolName, "unavailable", duration, null, "MCP server '" + serverName + "' is registered but not currently connected");
         }
 
-        if (!server.tools().contains(toolName)) {
+        if (!"health_probe".equals(toolName) && !server.tools().contains(toolName)) {
             long duration = System.currentTimeMillis() - start;
             return recordAndReturn(traceId, serverName, toolName, "error", duration, null, "Tool '" + toolName + "' not found on server '" + serverName + "'");
         }
 
         long duration = System.currentTimeMillis() - start;
         return recordAndReturn(traceId, serverName, toolName, "unavailable", duration, null, "MCP server not connected in current environment");
+    }
+
+    public McpCallResult probeServer(String traceId, McpServer server) {
+        Map<String, Object> input = Map.of(
+            "action", "health_probe",
+            "server", server.name(),
+            "expectedTools", server.tools()
+        );
+        return call(traceId, server.name(), "health_probe", input);
+    }
+
+    public Map<String, Object> probeToCallMap(String traceId, McpServer server) {
+        McpCallResult result = probeServer(traceId, server);
+        Map<String, Object> inputPreview = Map.of(
+            "server", server.name(),
+            "tool", "health_probe",
+            "description", server.description(),
+            "expectedTools", server.tools()
+        );
+        Map<String, Object> outputPreview = new LinkedHashMap<>();
+        outputPreview.put("available", server.available());
+        outputPreview.put("status", result.status());
+        if (result.error() != null && !result.error().isBlank()) {
+            outputPreview.put("error", result.error());
+        }
+        Map<String, Object> call = new LinkedHashMap<>();
+        call.put("server", server.name());
+        call.put("tool", "health_probe");
+        call.put("status", result.status());
+        call.put("durationMs", result.durationMs());
+        call.put("inputPreview", inputPreview);
+        call.put("outputPreview", outputPreview);
+        call.put("error", result.error() != null ? result.error() : "");
+        call.put("available", server.available());
+        return call;
     }
 
     public List<McpCallResult> getCallsForTrace(String traceId) {

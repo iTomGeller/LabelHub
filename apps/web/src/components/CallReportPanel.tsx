@@ -1,28 +1,46 @@
 "use client";
 
 import { callKindLabel, callStatusTone, flattenCalls, type CallRecord } from "@/lib/callReport";
+import { KeyValueViewer } from "./KeyValueViewer";
+import { Pagination, paginateSlice } from "./Pagination";
 import { useState } from "react";
 
-function BusinessCallCard({ row }: { row: CallRecord }) {
+const SPANS_PER_PAGE = 3;
+
+function CallDetailCard({ row }: { row: CallRecord }) {
   return (
-    <div className="rounded-xl border border-primary/10 bg-surface/40 p-3 space-y-1">
+    <div className="rounded-xl border border-primary/10 bg-surface/40 p-4 space-y-3">
       <div className="flex items-center justify-between gap-2">
-        <span className="text-xs font-bold text-primary">{callKindLabel(row.kind)}</span>
-        <span className={`rounded border px-1.5 py-0.5 text-[10px] font-bold ${callStatusTone(row.status)}`}>{row.statusZh}</span>
+        <div>
+          <span className="text-xs font-bold text-primary">{callKindLabel(row.kind)} · {row.nameZh}</span>
+          {row.whyCalled && <p className="text-[10px] text-ink/50 mt-0.5">为什么调用：{row.whyCalled}</p>}
+        </div>
+        <span className={`rounded border px-1.5 py-0.5 text-[10px] font-bold shrink-0 ${callStatusTone(row.status)}`}>{row.statusZh}</span>
       </div>
-      <p className="text-sm text-ink/80">{row.conclusion || row.nameZh}</p>
+
+      <div>
+        <p className="text-[10px] font-bold text-ink/40 mb-1">输入</p>
+        <KeyValueViewer data={row.inputPreview} />
+      </div>
+
+      <div>
+        <p className="text-[10px] font-bold text-ink/40 mb-1">输出</p>
+        <KeyValueViewer data={row.outputPreview} />
+      </div>
+
+      <div className="rounded-lg bg-white/70 px-3 py-2">
+        <p className="text-[10px] font-bold text-ink/40">结果影响</p>
+        <p className="text-sm text-ink/80">{row.resultSummary || row.conclusion || "—"}</p>
+        {row.degradeReason && (
+          <p className="text-xs text-warning mt-1">降级原因：{row.degradeReason}</p>
+        )}
+      </div>
+
       {row.durationMs != null && row.durationMs > 0 && (
         <p className="text-[10px] text-ink/40">耗时 {row.durationMs}ms</p>
       )}
     </div>
   );
-}
-
-function groupRows(rows: CallRecord[]) {
-  const knowledge = rows.filter((r) => r.kind === "rag");
-  const checks = rows.filter((r) => r.kind === "skill" || r.kind === "tool" || r.kind === "sandbox");
-  const external = rows.filter((r) => r.kind === "mcp");
-  return { knowledge, checks, external };
 }
 
 function CallTable({ rows }: { rows: CallRecord[] }) {
@@ -47,7 +65,7 @@ function CallTable({ rows }: { rows: CallRecord[] }) {
                 <span className={`rounded border px-1.5 py-0.5 font-bold ${callStatusTone(row.status)}`}>{row.statusZh}</span>
               </td>
               <td className="px-3 py-2 text-ink/50">{row.durationMs != null ? `${row.durationMs}ms` : "—"}</td>
-              <td className="px-3 py-2 text-ink/70 max-w-[200px]">{row.conclusion || "—"}</td>
+              <td className="px-3 py-2 text-ink/70 max-w-[200px]">{row.resultSummary || row.conclusion || "—"}</td>
             </tr>
           ))}
         </tbody>
@@ -56,10 +74,19 @@ function CallTable({ rows }: { rows: CallRecord[] }) {
   );
 }
 
-export function CallReportPanel({ calls, title = "执行摘要" }: { calls?: Record<string, unknown>; title?: string }) {
+export function CallReportPanel({
+  calls,
+  title = "执行摘要",
+  paginate = false,
+}: {
+  calls?: Record<string, unknown>;
+  title?: string;
+  paginate?: boolean;
+}) {
   const [showTechnical, setShowTechnical] = useState(false);
+  const [spanPage, setSpanPage] = useState(1);
   const rows = flattenCalls(calls);
-  const { knowledge, checks, external } = groupRows(rows);
+  const paged = paginate ? paginateSlice(rows, spanPage, SPANS_PER_PAGE) : { page: 1, totalPages: 1, items: rows };
 
   if (rows.length === 0) {
     return (
@@ -73,20 +100,14 @@ export function CallReportPanel({ calls, title = "执行摘要" }: { calls?: Rec
   return (
     <section className="space-y-3">
       <p className="text-xs font-bold text-ink/40">{title}</p>
-      <div className="grid gap-3 sm:grid-cols-3">
-        <div className="space-y-2">
-          <p className="text-[10px] font-bold text-ink/50">知识依据</p>
-          {knowledge.length === 0 ? <p className="text-xs text-ink/40">无知识召回</p> : knowledge.map((r, i) => <BusinessCallCard key={i} row={r} />)}
-        </div>
-        <div className="space-y-2">
-          <p className="text-[10px] font-bold text-ink/50">自动检查</p>
-          {checks.length === 0 ? <p className="text-xs text-ink/40">无额外检查</p> : checks.map((r, i) => <BusinessCallCard key={i} row={r} />)}
-        </div>
-        <div className="space-y-2">
-          <p className="text-[10px] font-bold text-ink/50">外部依赖</p>
-          {external.length === 0 ? <p className="text-xs text-ink/40">无外部调用</p> : external.map((r, i) => <BusinessCallCard key={i} row={r} />)}
-        </div>
+      <div className="space-y-3">
+        {paged.items.map((row, i) => (
+          <CallDetailCard key={`${row.id || row.kind}-${i}`} row={row} />
+        ))}
       </div>
+      {paginate && (
+        <Pagination page={paged.page} totalPages={paged.totalPages} onPageChange={setSpanPage} label="调用证据" />
+      )}
       <button
         type="button"
         onClick={() => setShowTechnical((v) => !v)}

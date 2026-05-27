@@ -2,6 +2,9 @@
 
 import { useState, useEffect } from "react";
 import { AgentTraceDag } from "./AgentTraceDag";
+import { Pagination, paginateSlice } from "./Pagination";
+
+const RECENT_TRACES_PER_PAGE = 4;
 
 interface TraceNode {
   id: string;
@@ -47,6 +50,8 @@ interface RecentRun {
 export function AgentTraceView({ traceId }: { traceId?: string }) {
   const [data, setData] = useState<AgentRunData | null>(null);
   const [recentRuns, setRecentRuns] = useState<RecentRun[]>([]);
+  const [recentPage, setRecentPage] = useState(1);
+  const [recentFilter, setRecentFilter] = useState<string>("all");
   const [loading, setLoading] = useState(false);
   const [recentLoading, setRecentLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -76,6 +81,12 @@ export function AgentTraceView({ traceId }: { traceId?: string }) {
   }, [traceId]);
 
   if (!traceId) {
+    const filteredRuns = recentRuns.filter((run) => {
+      if (recentFilter === "all") return true;
+      return run.status === recentFilter;
+    });
+    const recentPaged = paginateSlice(filteredRuns, recentPage, RECENT_TRACES_PER_PAGE);
+
     return (
       <div className="space-y-6 min-w-0">
         <div>
@@ -112,8 +123,21 @@ export function AgentTraceView({ traceId }: { traceId?: string }) {
               </a>
             </div>
           ) : (
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 min-w-0">
-              {recentRuns.map((run) => {
+            <>
+              <div className="flex flex-wrap gap-1 mb-4">
+                {["all", "success", "warning", "partial"].map((st) => (
+                  <button
+                    key={st}
+                    type="button"
+                    onClick={() => { setRecentFilter(st); setRecentPage(1); }}
+                    className={`rounded-lg px-3 py-1.5 text-xs font-bold ${recentFilter === st ? "bg-accent text-white" : "bg-surface text-ink/60"}`}
+                  >
+                    {st === "all" ? "全部" : st}
+                  </button>
+                ))}
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-2 min-w-0">
+              {recentPaged.items.map((run) => {
                 const bizCount = Number(run.business_node_count ?? 0);
                 const devCount = Number(run.developer_node_count ?? 0);
                 const complete = run.trace_completeness === true || run.trace_completeness === 1;
@@ -169,7 +193,15 @@ export function AgentTraceView({ traceId }: { traceId?: string }) {
                   </div>
                 );
               })}
-            </div>
+              </div>
+              <Pagination
+                className="mt-4"
+                page={recentPaged.page}
+                totalPages={recentPaged.totalPages}
+                onPageChange={setRecentPage}
+                label="最近 Trace"
+              />
+            </>
           )}
         </div>
       </div>
