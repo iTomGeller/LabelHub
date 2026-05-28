@@ -69,7 +69,7 @@ public final class TaskSemanticAnalyzer {
         List<Map<String, Object>> items = new ArrayList<>();
         for (String required : List.of("情感倾向", "触发关键句", "判断理由")) {
             boolean present = labels.stream().anyMatch(l -> l.contains(required.replace("触发", "").trim()) || l.contains(required));
-            items.add(Map.of("type", "component", "label", required, "value", present ? "已配置" : "缺失", "source", "schemaComponents", "status", present ? "ok" : "missing"));
+            items.add(Map.of("type", "checklist", "label", required, "value", present ? "已配置" : "缺失", "source", "schemaComponents", "status", present ? "ok" : "missing"));
         }
         for (Map<String, Object> c : components) {
             String label = String.valueOf(c.getOrDefault("label", ""));

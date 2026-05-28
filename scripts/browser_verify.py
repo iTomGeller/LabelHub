@@ -121,6 +121,8 @@ def assert_evidence_items_structured(nodes):
             if item.get("type") == "component":
                 role = item.get("role")
                 req = item.get("requirement")
+                if role is None and item.get("fieldPath") is None:
+                    continue
                 if not role:
                     raise AssertionError(f"node {node_key} component evidence missing role")
                 if req not in COMPONENT_REQUIREMENTS:

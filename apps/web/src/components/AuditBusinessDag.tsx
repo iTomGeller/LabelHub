@@ -82,11 +82,11 @@ function EvidenceItemCard({ row }: { row: Record<string, unknown> }) {
       </li>
     );
   }
-  if (type === "distribution" || type === "auto_pass") {
+  if (type === "distribution" || type === "auto_pass" || type === "checklist") {
     return (
       <li className="flex items-center justify-between rounded-lg bg-white/80 px-3 py-2">
         <span className="text-sm text-ink/70">{String(row.label)}</span>
-        <span className="font-bold text-primary">{String(row.value)}</span>
+        <span className={`font-bold ${String(row.value) === "缺失" ? "text-warning" : "text-primary"}`}>{String(row.value)}</span>
       </li>
     );
   }
