@@ -378,20 +378,7 @@ public class AgentRunService {
     }
 
     private List<Map<String, Object>> schemaComponentEvidence(List<Map<String, Object>> components) {
-        if (components == null || components.isEmpty()) return List.of();
-        List<Map<String, Object>> items = new ArrayList<>();
-        for (Map<String, Object> c : components) {
-            items.add(Map.of(
-                "type", "component",
-                "label", String.valueOf(c.getOrDefault("label", c.getOrDefault("id", "?"))),
-                "value", String.format("id=%s type=%s path=%s required=%s validations=%s",
-                    c.getOrDefault("id", "?"), c.getOrDefault("type", "?"), c.getOrDefault("dataPath", "?"),
-                    c.getOrDefault("required", false),
-                    c.get("validation") instanceof List<?> v ? v.size() : 0),
-                "source", "schemaComponents"
-            ));
-        }
-        return items;
+        return EvidenceFormatUtil.schemaComponentEvidence(components);
     }
 
     private List<Map<String, Object>> rubricRuleEvidence(List<Map<String, Object>> rules) {
@@ -406,7 +393,7 @@ public class AgentRunService {
         List<Map<String, Object>> items = new ArrayList<>();
         items.add(Map.of("type", "distribution", "label", "规则总数", "value", rules.size(), "source", "rubricRules"));
         for (var e : severityDist.entrySet()) {
-            items.add(Map.of("type", "severity", "label", e.getKey(), "value", e.getValue(), "source", "rubricRules"));
+            items.add(Map.of("type", "severity", "label", EvidenceFormatUtil.severityZh(e.getKey()), "value", e.getValue(), "source", "rubricRules"));
         }
         items.add(Map.of("type", "auto_pass", "label", "允许自动通过", "value", autoPass, "source", "rubricRules"));
         return items;

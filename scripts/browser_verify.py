@@ -34,7 +34,13 @@ UI_BUNDLE_MARKERS = [
     "agent-trace-drawer",
     "call-io-card",
     "Agent 排障抽屉",
+    "knowledge-card",
+    "knowledge-search",
 ]
+TECH_EVIDENCE_RE = re.compile(r"^id=.*\stype=.*\spath=", re.I)
+COMPONENT_REQUIREMENTS = {"必填", "可选"}
+SEVERITY_LABELS = {"高", "中", "低", "未知"}
+GRAFANA_REQUIRED_PANELS = ["业务节点 7 天健康", "降级链路"]
 
 
 def fetch(path, method="GET", body=None, timeout=120):
@@ -100,19 +106,55 @@ def _collect_js_chunks(html: str, limit=20):
     return list(dict.fromkeys(re.findall(r"/_next/static/chunks/[^\"']+\.js", html)))[:limit]
 
 
-def check_ui_bundle_drawer_markers():
-    _, html = fetch("/?view=trace")
-    chunks = _collect_js_chunks(html)
-    if not chunks:
-        raise AssertionError("no next.js chunks found on trace page")
+def assert_evidence_items_structured(nodes):
+    """Fresh audit evidence must not expose raw schema technical strings."""
+    tech_strings = 0
+    component_ok = 0
+    severity_ok = 0
+    for node in nodes:
+        node_key = node.get("nodeKey")
+        details = node.get("details") or {}
+        for item in details.get("evidenceItems") or []:
+            val = item.get("value")
+            if isinstance(val, str) and TECH_EVIDENCE_RE.search(val):
+                tech_strings += 1
+            if item.get("type") == "component":
+                role = item.get("role")
+                req = item.get("requirement")
+                if not role:
+                    raise AssertionError(f"node {node_key} component evidence missing role")
+                if req not in COMPONENT_REQUIREMENTS:
+                    raise AssertionError(f"node {node_key} component requirement invalid: {req!r}")
+                component_ok += 1
+            if item.get("type") == "severity":
+                label = item.get("label")
+                if label not in SEVERITY_LABELS:
+                    raise AssertionError(f"node {node_key} severity label not zh: {label!r}")
+                severity_ok += 1
+    if tech_strings > 0:
+        raise AssertionError(f"found {tech_strings} legacy technical evidence value strings")
+    return component_ok, severity_ok
+
+
+def _bundle_markers_from_pages(paths):
     blob = ""
-    for chunk in chunks:
-        _, js = fetch(chunk)
-        blob += js
+    chunks_total = 0
+    for path in paths:
+        _, html = fetch(path)
+        chunks = _collect_js_chunks(html)
+        chunks_total += len(chunks)
+        for chunk in chunks:
+            _, js = fetch(chunk)
+            blob += js
     missing = [m for m in UI_BUNDLE_MARKERS if m not in blob]
     if missing:
-        raise AssertionError(f"bundle missing drawer markers: {missing}")
-    return f"markers={len(UI_BUNDLE_MARKERS)}, chunks={len(chunks)}"
+        raise AssertionError(f"bundle missing markers: {missing}")
+    return len(UI_BUNDLE_MARKERS), chunks_total
+
+
+def check_ui_bundle_drawer_markers():
+    count, chunks = _bundle_markers_from_pages(["/?view=trace", "/?view=settings"])
+    return f"markers={count}, chunks={chunks}"
 
 
 def check_ui_drawer_playwright():
@@ -153,7 +195,12 @@ def check_grafana_api():
         raise AssertionError('missing variable label 智能体')
     if "全部智能体" not in text:
         raise AssertionError('missing 全部智能体 default text')
-    return f"title={title}"
+    panels = dash.get("panels") or []
+    panel_titles = [p.get("title", "") for p in panels]
+    for required in GRAFANA_REQUIRED_PANELS:
+        if not any(required in t for t in panel_titles):
+            raise AssertionError(f"missing grafana panel containing {required!r}")
+    return f"title={title}, panels={len(panels)}"
 
 
 def check_knowledge_seeded():
@@ -253,8 +300,10 @@ def check_task_text_cls_audit():
     if skill_spans < 1:
         raise AssertionError(f"expected >=1 skill span with io, got {skill_spans}")
 
+    comp_ev, sev_ev = assert_evidence_items_structured(nodes)
+
     trace_id = data.get("traceId")
-    return f"traceId={trace_id}, ragHits={rag_hits}, spans={span_total}, skillSpans={skill_spans}, terms={matched}"
+    return f"traceId={trace_id}, ragHits={rag_hits}, spans={span_total}, skillSpans={skill_spans}, terms={matched}, componentEvidence={comp_ev}, severityEvidence={sev_ev}"
 
 
 def check_web_publish_task_text_cls():

@@ -51,6 +51,94 @@ const FIX_STEP_LABELS: Record<string, string> = {
   publish: "确认发布",
 };
 
+function EvidenceItemCard({ row }: { row: Record<string, unknown> }) {
+  const type = String(row.type || "");
+  if (type === "component") {
+    const required = String(row.requirement || "");
+    return (
+      <li className="flex flex-wrap items-center gap-2 rounded-lg bg-white/80 px-3 py-2">
+        <span className="font-bold text-primary">{String(row.label)}</span>
+        <span className="text-[10px] rounded border border-primary/15 bg-surface/40 px-1.5 py-0.5 text-ink/60">
+          {String(row.role || "组件")}
+        </span>
+        <span
+          className={`text-[10px] rounded border px-1.5 py-0.5 ${
+            required === "必填" ? "border-accent/30 bg-accent/10 text-accent" : "border-primary/15 text-ink/40"
+          }`}
+        >
+          {required || "可选"}
+        </span>
+        {Number(row.validationCount) > 0 && (
+          <span className="text-[10px] text-ink/40">校验 {String(row.validationCount)} 条</span>
+        )}
+      </li>
+    );
+  }
+  if (type === "severity") {
+    return (
+      <li className="flex items-center justify-between rounded-lg bg-white/80 px-3 py-2">
+        <span className="text-sm text-ink/70">严重级别 · {String(row.label)}</span>
+        <span className="font-bold text-primary">{String(row.value)} 条</span>
+      </li>
+    );
+  }
+  if (type === "distribution" || type === "auto_pass") {
+    return (
+      <li className="flex items-center justify-between rounded-lg bg-white/80 px-3 py-2">
+        <span className="text-sm text-ink/70">{String(row.label)}</span>
+        <span className="font-bold text-primary">{String(row.value)}</span>
+      </li>
+    );
+  }
+  return (
+    <li className="rounded-lg bg-white/80 px-3 py-2 text-sm text-ink/70">
+      <span className="font-bold text-primary">{String(row.label ?? row.type ?? "依据")}</span>
+    </li>
+  );
+}
+
+function BusinessInputCard({ nodeKey, details }: { nodeKey: string; details: Record<string, unknown> }) {
+  const actual = (details.actual || {}) as Record<string, unknown>;
+  const chips: Array<{ label: string; value: string }> = [];
+  if (nodeKey === "sample_data" && actual.sampleCount != null) {
+    chips.push({ label: "样例条数", value: `${actual.sampleCount} 条` });
+  }
+  if (Array.isArray(actual.fields) && actual.fields.length) {
+    chips.push({ label: "字段", value: actual.fields.slice(0, 4).join("、") });
+  }
+  if (nodeKey === "annotation_template" && actual.componentCount != null) {
+    chips.push({ label: "组件数", value: `${actual.componentCount} 个` });
+  }
+  if (nodeKey === "quality_rules" && actual.ruleCount != null) {
+    chips.push({ label: "规则条数", value: `${actual.ruleCount} 条` });
+  }
+  if (Array.isArray(actual.dimensions) && actual.dimensions.length) {
+    chips.push({ label: "评分维度", value: actual.dimensions.join("、") });
+  }
+  if (chips.length === 0 && Array.isArray(details.checkedItems)) {
+    for (const it of (details.checkedItems as Array<Record<string, unknown>>).slice(0, 3)) {
+      chips.push({ label: String(it.label || ""), value: String(it.value || "") });
+    }
+  }
+  return (
+    <section className="rounded-xl border border-primary/10 bg-surface/30 p-4">
+      <p className="text-[10px] font-bold text-ink/40 mb-2">业务输入</p>
+      {chips.length === 0 ? (
+        <p className="text-sm text-ink/50">本节点无显式输入指标</p>
+      ) : (
+        <ul className="space-y-1.5">
+          {chips.map((c, i) => (
+            <li key={i} className="flex items-center justify-between rounded-lg bg-white/80 px-3 py-1.5">
+              <span className="text-xs text-ink/40">{c.label}</span>
+              <span className="text-sm font-bold text-primary">{c.value}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
 const DAG_ORDER = [
   "task_description",
   "sample_data",
@@ -96,33 +184,30 @@ function BusinessConclusionDrawer({
         className="fixed right-0 top-0 bottom-0 z-50 w-full max-w-3xl overflow-y-auto border-l border-accent/20 bg-white shadow-2xl"
         data-testid="business-conclusion-drawer"
       >
-        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-primary/10 bg-white px-5 py-4">
-          <div>
+        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-primary/10 bg-white px-5 py-4 gap-3">
+          <div className="min-w-0">
             <p className="text-xs font-bold text-ink/40">业务结论 · {nodeLabel(node.nodeKey)}</p>
             <h4 className="text-lg font-bold text-primary">{node.title}</h4>
             <p className="text-[10px] text-ink/40 mt-1">
               {node.durationMs}ms · 上游 {upstream.map(nodeLabel).join("、") || "无"} → 下游 {downstream.map(nodeLabel).join("、") || "无"}
             </p>
           </div>
-          <button onClick={onClose} className="rounded-lg px-3 py-1.5 text-sm text-ink/50 hover:bg-surface shrink-0">关闭</button>
+          <div className="flex items-center gap-2 shrink-0">
+            {traceId && (
+              <a
+                href={`/?view=trace&traceId=${encodeURIComponent(traceId)}`}
+                className="rounded-lg border border-primary/15 bg-surface/30 px-3 py-1.5 text-xs font-bold text-primary hover:bg-surface/50"
+              >
+                开发者 Trace →
+              </a>
+            )}
+            <button onClick={onClose} className="rounded-lg px-3 py-1.5 text-sm text-ink/50 hover:bg-surface">关闭</button>
+          </div>
         </div>
 
         <div className="space-y-5 p-5">
-          {traceId && (
-            <a
-              href={`/?view=trace&traceId=${encodeURIComponent(traceId)}`}
-              className="inline-block rounded-xl border border-primary/15 bg-surface/30 px-4 py-2 text-xs font-bold text-primary hover:bg-surface/50"
-            >
-              查看开发者 Trace →
-            </a>
-          )}
-
           <div className="grid gap-4 sm:grid-cols-2">
-            <section className="rounded-xl border border-primary/10 bg-surface/30 p-4">
-              <p className="text-[10px] font-bold text-ink/40 mb-2">业务输入</p>
-              <p className="text-sm text-ink/70">{nodeLabel(node.nodeKey)} 审核维度</p>
-              <p className="text-xs text-ink/50 mt-2">基于任务配置与上游检查结果</p>
-            </section>
+            <BusinessInputCard nodeKey={node.nodeKey} details={(node.details || {}) as Record<string, unknown>} />
 
             <section className={`rounded-xl border p-4 ${tone.bg} ${tone.border}`}>
               <p className="text-[10px] font-bold text-ink/40 mb-2">审核结论</p>
@@ -138,15 +223,9 @@ function BusinessConclusionDrawer({
             {evidenceItems.length > 0 && (
               <>
                 <ul className="mt-3 space-y-1 text-xs text-ink/70">
-                  {evidencePaged.items.map((item, i) => {
-                    const row = item as Record<string, unknown>;
-                    return (
-                      <li key={i} className="rounded-lg bg-white/80 px-2 py-1.5">
-                        <span className="font-bold text-primary">{String(row.label ?? row.type)}</span>
-                        {row.value != null && <span> — {String(row.value)}</span>}
-                      </li>
-                    );
-                  })}
+                  {evidencePaged.items.map((item, i) => (
+                    <EvidenceItemCard key={i} row={item as Record<string, unknown>} />
+                  ))}
                 </ul>
                 <Pagination className="mt-2" page={evidencePaged.page} totalPages={evidencePaged.totalPages} onPageChange={setEvidencePage} label="依据条目" />
               </>

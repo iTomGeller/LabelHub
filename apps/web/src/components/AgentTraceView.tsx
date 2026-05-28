@@ -3,8 +3,55 @@
 import { useState, useEffect } from "react";
 import { AgentTraceDag } from "./AgentTraceDag";
 import { Pagination, paginateSlice } from "./Pagination";
+import { statusLabelZh } from "@/lib/diagnosticLabels";
 
-const RECENT_TRACES_PER_PAGE = 4;
+const RECENT_TRACES_PER_PAGE = 6;
+
+const TASK_TITLE: Record<string, string> = {
+  task_text_cls_001: "客服对话情感分类",
+  task_ner_002: "命名实体识别示例",
+};
+
+function taskTitleFromId(taskId: string) {
+  return TASK_TITLE[taskId] || taskId.replace(/^task_/, "").replace(/_/g, " ");
+}
+
+function formatRelative(iso: string) {
+  if (!iso) return "—";
+  try {
+    const d = new Date(iso);
+    const diffMs = Date.now() - d.getTime();
+    const mins = Math.floor(diffMs / 60000);
+    if (mins < 1) return "刚刚";
+    if (mins < 60) return `${mins} 分钟前`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `${hours} 小时前`;
+    const days = Math.floor(hours / 24);
+    if (days < 7) return `${days} 天前`;
+    return d.toLocaleDateString("zh-CN", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  } catch {
+    return iso.slice(0, 16);
+  }
+}
+
+function statusChipClass(status: string) {
+  if (status === "success") return "bg-success/10 text-success";
+  if (status === "partial") return "bg-danger/10 text-danger";
+  return "bg-warning/10 text-warning";
+}
+
+function Chip({ label, value, tone }: { label: string; value: string; tone: "ok" | "warn" | "neutral" }) {
+  const toneClass =
+    tone === "ok" ? "border-success/20 bg-success/5 text-success" :
+    tone === "warn" ? "border-warning/20 bg-warning/5 text-warning" :
+    "border-primary/10 bg-surface/50 text-ink/70";
+  return (
+    <span className={`text-[10px] rounded border px-2 py-0.5 ${toneClass}`}>
+      <span className="text-ink/40 mr-1">{label}</span>
+      <span className="font-bold">{value}</span>
+    </span>
+  );
+}
 
 interface TraceNode {
   id: string;
@@ -136,61 +183,38 @@ export function AgentTraceView({ traceId }: { traceId?: string }) {
                   </button>
                 ))}
               </div>
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-2 min-w-0">
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 min-w-0">
               {recentPaged.items.map((run) => {
                 const bizCount = Number(run.business_node_count ?? 0);
                 const devCount = Number(run.developer_node_count ?? 0);
                 const complete = run.trace_completeness === true || run.trace_completeness === 1;
                 return (
-                  <div key={run.trace_id} className="rounded-xl border border-primary/10 bg-surface/30 p-4 transition hover:border-accent/30 flex flex-col gap-3 min-w-0">
-                    <div className="flex items-start justify-between gap-2 min-w-0">
+                  <article key={run.trace_id} className="rounded-2xl border border-primary/10 bg-white p-4 hover:border-accent/30 transition flex flex-col gap-3 min-w-0">
+                    <header className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
-                        <p className="text-xs font-bold text-ink/40 mb-1">Trace ID</p>
-                        <p className="font-mono text-xs text-primary truncate">{run.trace_id}</p>
+                        <p className="text-sm font-bold text-primary truncate">{taskTitleFromId(run.task_id)}</p>
+                        <p className="text-[10px] text-ink/40 mt-0.5">{formatRelative(run.finished_at)}</p>
                       </div>
-                      <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                        run.status === "success" ? "bg-success/10 text-success" : run.status === "partial" ? "bg-danger/10 text-danger" : "bg-warning/10 text-warning"
-                      }`}>
-                        {run.status}
+                      <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${statusChipClass(run.status)}`}>
+                        {statusLabelZh(run.status)}
                       </span>
+                    </header>
+                    <div className="flex flex-wrap gap-1.5">
+                      <Chip label="业务" value={`${bizCount}/6`} tone={bizCount === 6 ? "ok" : "warn"} />
+                      <Chip label="开发者" value={String(devCount)} tone="neutral" />
+                      <Chip label="完整性" value={complete ? "完整" : "不完整"} tone={complete ? "ok" : "warn"} />
+                      {run.from_cache && <Chip label="缓存" value="命中" tone="neutral" />}
                     </div>
-                    <div className="grid grid-cols-2 gap-2 text-xs">
-                      <div className="min-w-0">
-                        <span className="text-ink/40">任务</span>
-                        <p className="font-mono truncate text-primary">{run.task_id}</p>
-                      </div>
-                      <div className="min-w-0">
-                        <span className="text-ink/40">缓存命中</span>
-                        <p className="text-primary">{run.from_cache ? "是" : "否"}</p>
-                      </div>
-                      <div className="min-w-0">
-                        <span className="text-ink/40">业务节点</span>
-                        <p className="text-primary">{bizCount}/6</p>
-                      </div>
-                      <div className="min-w-0">
-                        <span className="text-ink/40">Trace 节点</span>
-                        <p className="text-primary">{devCount}</p>
-                      </div>
-                    </div>
-                    <div className="text-xs">
-                      <span className="text-ink/40">Trace 完整性</span>
-                      <p className={complete ? "text-success font-bold" : "text-warning font-bold"}>
-                        {complete ? "完整" : bizCount === 0 && devCount === 0 ? "保存失败" : "不完整"}
-                      </p>
-                    </div>
-                    <div className="text-xs">
-                      <span className="text-ink/40">完成时间</span>
-                      <p className="text-ink/80">{run.finished_at || "—"}</p>
-                    </div>
-                    <div className="mt-1 pt-3 border-t border-primary/10">
+                    <footer className="flex items-center justify-between pt-3 border-t border-primary/5 mt-auto">
+                      <span className="font-mono text-[10px] text-ink/30 truncate max-w-[50%]">{run.trace_id.slice(0, 20)}…</span>
                       <a
                         href={`/?view=trace&traceId=${encodeURIComponent(run.trace_id)}`}
-                        className="block w-full text-center rounded-lg bg-white border border-accent/20 px-3 py-2 text-xs font-bold text-accent transition hover:bg-accent hover:text-white"
+                        className="rounded-lg border border-accent/30 text-accent px-3 py-1.5 text-xs font-bold hover:bg-accent hover:text-white shrink-0"
                       >
-                        查看 Trace 详情
+                        查看详情 →
                       </a>
-                    </div>
-                  </div>
+                    </footer>
+                  </article>
                 );
               })}
               </div>

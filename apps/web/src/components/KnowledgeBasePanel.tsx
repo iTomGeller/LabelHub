@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 
 interface KnowledgeDoc {
   id: string;
@@ -14,6 +14,16 @@ interface KnowledgeDoc {
 
 const CATEGORIES = ["标注规范", "数据规范", "模板规范", "质检规则", "契约规范", "项目要求", "通用"];
 
+function formatDate(iso: string) {
+  if (!iso) return "—";
+  try {
+    const d = new Date(iso);
+    return d.toLocaleDateString("zh-CN", { year: "numeric", month: "short", day: "numeric" });
+  } catch {
+    return iso.slice(0, 10);
+  }
+}
+
 export function KnowledgeBasePanel() {
   const [documents, setDocuments] = useState<KnowledgeDoc[]>([]);
   const [loading, setLoading] = useState(false);
@@ -24,6 +34,8 @@ export function KnowledgeBasePanel() {
   const [uploading, setUploading] = useState(false);
   const [testQuery, setTestQuery] = useState("");
   const [testResults, setTestResults] = useState<{ chunkId: string; documentTitle: string; excerpt: string; score: number }[]>([]);
+  const [search, setSearch] = useState("");
+  const [catFilter, setCatFilter] = useState("全部");
 
   const loadDocuments = useCallback(async () => {
     setLoading(true);
@@ -35,6 +47,22 @@ export function KnowledgeBasePanel() {
   }, []);
 
   useEffect(() => { loadDocuments(); }, [loadDocuments]);
+
+  const usedCategories = useMemo(() => {
+    const set = new Set(documents.map((d) => d.category));
+    return CATEGORIES.filter((c) => set.has(c)).concat([...set].filter((c) => !CATEGORIES.includes(c)));
+  }, [documents]);
+
+  const totalChunks = useMemo(() => documents.reduce((s, d) => s + d.chunkCount, 0), [documents]);
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return documents.filter((d) => {
+      if (catFilter !== "全部" && d.category !== catFilter) return false;
+      if (!q) return true;
+      return d.title.toLowerCase().includes(q) || d.content.toLowerCase().includes(q);
+    });
+  }, [documents, search, catFilter]);
 
   async function handleUpload() {
     if (!title.trim() || !content.trim()) return;
@@ -69,17 +97,40 @@ export function KnowledgeBasePanel() {
 
   return (
     <div className="space-y-5 min-w-0">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between min-w-0">
+      <div className="flex flex-wrap items-center gap-3 justify-between">
         <div className="min-w-0">
           <h3 className="text-lg font-bold text-primary">知识库管理</h3>
-          <p className="text-xs text-ink/50">上传标注规范、业务词表、质量规则等文档，AI 审核时动态召回相关知识</p>
+          <p className="text-xs text-ink/50">
+            共 {documents.length} 篇 · {totalChunks} chunks · {usedCategories.length} 个分类
+          </p>
         </div>
-        <button onClick={() => setShowUpload(!showUpload)} className="shrink-0 self-start rounded-xl bg-accent px-4 py-2 text-sm font-bold text-white hover:bg-accent/90">
-          {showUpload ? "取消" : "上传文档"}
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            placeholder="搜索标题或内容"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="rounded-lg border border-primary/15 px-3 py-1.5 text-sm w-56"
+            data-testid="knowledge-search"
+          />
+          <button onClick={() => setShowUpload(!showUpload)} className="shrink-0 rounded-xl bg-accent px-4 py-2 text-sm font-bold text-white hover:bg-accent/90">
+            {showUpload ? "取消" : "上传文档"}
+          </button>
+        </div>
       </div>
 
-      {/* Upload Form */}
+      <div className="flex flex-wrap gap-1">
+        {["全部", ...usedCategories].map((c) => (
+          <button
+            key={c}
+            type="button"
+            onClick={() => setCatFilter(c)}
+            className={`rounded-lg px-3 py-1.5 text-xs font-bold ${catFilter === c ? "bg-accent text-white" : "bg-surface text-ink/60"}`}
+          >
+            {c}
+          </button>
+        ))}
+      </div>
+
       {showUpload && (
         <div className="rounded-xl border border-accent/20 bg-accent/5 p-4 space-y-3">
           <input value={title} onChange={e => setTitle(e.target.value)} placeholder="文档标题" className="w-full rounded-lg border border-primary/15 px-3 py-2 text-sm" />
@@ -93,23 +144,33 @@ export function KnowledgeBasePanel() {
         </div>
       )}
 
-      {/* Document List */}
-      <div className="space-y-2">
+      <div>
         {loading && <p className="text-sm text-ink/40">加载中…</p>}
         {!loading && documents.length === 0 && <p className="text-sm text-ink/40">暂无知识库文档，上传后 AI 审核时将动态召回</p>}
-        {documents.map(doc => (
-          <div key={doc.id} className="rounded-xl border border-primary/10 bg-white px-4 py-3">
-            <div className="flex items-center gap-3">
-              <span className="text-[10px] bg-accent/5 text-accent border border-accent/10 rounded px-2 py-0.5">{doc.category}</span>
-              <span className="text-sm font-bold text-primary">{doc.title}</span>
-              <span className="ml-auto text-[10px] text-ink/30">{doc.chunkCount} chunks</span>
-            </div>
-            <p className="mt-1 text-xs text-ink/50 truncate">{doc.content}</p>
-          </div>
-        ))}
+        {!loading && documents.length > 0 && filtered.length === 0 && (
+          <p className="text-sm text-ink/40">没有匹配的文档，试试调整搜索或分类筛选</p>
+        )}
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {filtered.map((doc) => (
+            <article
+              key={doc.id}
+              className="rounded-2xl border border-primary/10 bg-white p-4 hover:border-accent/30 transition flex flex-col gap-3"
+              data-testid="knowledge-card"
+            >
+              <header className="flex items-start justify-between gap-2">
+                <h4 className="text-sm font-bold text-primary leading-snug line-clamp-2">{doc.title}</h4>
+                <span className="shrink-0 text-[10px] rounded border border-accent/20 bg-accent/5 text-accent px-2 py-0.5">{doc.category}</span>
+              </header>
+              <p className="text-xs text-ink/60 line-clamp-3 leading-relaxed flex-1">{doc.content}</p>
+              <footer className="flex items-center justify-between text-[10px] text-ink/40 pt-2 border-t border-primary/5">
+                <span>{doc.chunkCount} chunks · {doc.sourceType}</span>
+                <time>{formatDate(doc.createdAt)}</time>
+              </footer>
+            </article>
+          ))}
+        </div>
       </div>
 
-      {/* Test Retrieval */}
       <div className="rounded-xl border border-primary/10 bg-white p-4 space-y-3">
         <h4 className="text-sm font-bold text-primary">测试召回</h4>
         <div className="flex gap-2">
@@ -117,14 +178,18 @@ export function KnowledgeBasePanel() {
           <button onClick={handleTestRetrieve} className="rounded-lg bg-accent/10 text-accent px-3 py-2 text-sm font-bold hover:bg-accent/20">检索</button>
         </div>
         {testResults.length > 0 && (
-          <div className="space-y-2">
+          <div className="grid gap-2 md:grid-cols-2">
             {testResults.map((r, i) => (
-              <div key={i} className="rounded-lg bg-surface/60 px-3 py-2 text-xs">
-                <div className="flex items-center gap-2">
-                  <span className="font-bold text-primary">{r.documentTitle}</span>
-                  <span className="text-ink/30">score: {r.score.toFixed(2)}</span>
+              <div key={i} className="rounded-xl border border-primary/10 bg-white p-3 text-xs">
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <span className="font-bold text-primary truncate">{r.documentTitle}</span>
+                  <span className="text-[10px] text-ink/40 shrink-0">{(r.score * 100).toFixed(0)}%</span>
                 </div>
-                <p className="mt-1 text-ink/60">{r.excerpt}</p>
+                <div className="h-1.5 rounded-full bg-surface overflow-hidden mb-2">
+                  <div className="h-full bg-accent rounded-full" style={{ width: `${Math.min(100, r.score * 100)}%` }} />
+                </div>
+                <p className="text-ink/60 line-clamp-2">{r.excerpt}</p>
+                {r.chunkId && <p className="text-[10px] text-ink/30 mt-1 font-mono truncate">{r.chunkId}</p>}
               </div>
             ))}
           </div>

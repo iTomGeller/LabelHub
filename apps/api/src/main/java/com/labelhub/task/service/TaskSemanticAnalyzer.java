@@ -74,9 +74,9 @@ public final class TaskSemanticAnalyzer {
         for (Map<String, Object> c : components) {
             String label = String.valueOf(c.getOrDefault("label", ""));
             if (label.contains("情感") || label.contains("情绪") || label.contains("理由") || label.contains("关键句")) {
-                items.add(Map.of("type", "component", "label", label, "value",
-                    String.format("type=%s required=%s", c.getOrDefault("type", "?"), c.getOrDefault("required", false)),
-                    "source", "schemaComponents", "status", "ok"));
+                Map<String, Object> item = new LinkedHashMap<>(EvidenceFormatUtil.componentEvidenceItem(c));
+                item.put("status", "ok");
+                items.add(item);
             }
         }
         return items;
