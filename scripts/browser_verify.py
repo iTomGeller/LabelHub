@@ -76,6 +76,26 @@ def assert_span_contract(span, node_key):
         raise AssertionError(f"mcp span missing server input on {node_key}")
 
 
+def assert_agent_execution_contract(out, node_id):
+    missing = [f for f in REQUIRED_AGENT_OUTPUT_FIELDS if f not in out]
+    if missing:
+        raise AssertionError(f"agent node {node_id} outputPreview missing: {missing}")
+    steps = out.get("decisionSteps") or []
+    if not steps:
+        raise AssertionError(f"agent node {node_id} decisionSteps empty")
+    graph = out.get("internalGraph") or {}
+    nodes = graph.get("nodes") or []
+    edges = graph.get("edges") or []
+    if len(nodes) < 3:
+        raise AssertionError(f"agent node {node_id} internalGraph.nodes too few: {len(nodes)}")
+    if not edges:
+        raise AssertionError(f"agent node {node_id} internalGraph.edges empty")
+    types = {n.get("type") for n in nodes}
+    for required in ("prompt", "decision", "output"):
+        if required not in types:
+            raise AssertionError(f"agent node {node_id} missing internal node type {required}")
+
+
 def _collect_js_chunks(html: str, limit=20):
     return list(dict.fromkeys(re.findall(r"/_next/static/chunks/[^\"']+\.js", html)))[:limit]
 
@@ -114,23 +134,6 @@ def check_ui_drawer_playwright():
     if "SKIP playwright not installed" in out:
         return "skipped (playwright not installed)"
     raise AssertionError(out.strip() or f"exit {proc.returncode}")
-    missing = [f for f in REQUIRED_AGENT_OUTPUT_FIELDS if f not in out]
-    if missing:
-        raise AssertionError(f"agent node {node_id} outputPreview missing: {missing}")
-    steps = out.get("decisionSteps") or []
-    if not steps:
-        raise AssertionError(f"agent node {node_id} decisionSteps empty")
-    graph = out.get("internalGraph") or {}
-    nodes = graph.get("nodes") or []
-    edges = graph.get("edges") or []
-    if len(nodes) < 3:
-        raise AssertionError(f"agent node {node_id} internalGraph.nodes too few: {len(nodes)}")
-    if not edges:
-        raise AssertionError(f"agent node {node_id} internalGraph.edges empty")
-    types = {n.get("type") for n in nodes}
-    for required in ("prompt", "decision", "output"):
-        if required not in types:
-            raise AssertionError(f"agent node {node_id} missing internal node type {required}")
 
 
 def check_grafana_api():
