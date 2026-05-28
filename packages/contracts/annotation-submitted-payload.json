@@ -1,0 +1,15 @@
+{
+  "schemaVersionId": "schema-v2.1",
+  "rubricVersionId": "rubric-v1.0",
+  "annotationResult": {
+    "sentiment": "正面",
+    "confidence": 0.95,
+    "categories": ["产品体验", "用户满意度"]
+  },
+  "annotationDurationMs": 12500,
+  "labelerId": "user-labeler-001",
+  "itemId": "item-data-001",
+  "taskId": "task-sentiment-001",
+  "submittedAt": "2026-05-22T10:00:00Z",
+  "traceId": "trace-a7f3e2b1-001"
+}

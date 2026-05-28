@@ -1,0 +1,8 @@
+{
+  "/not-found": "app/not-found.js",
+  "/page": "app/page.js",
+  "/tasks/page": "app/tasks/page.js",
+  "/annotation/dynamic/page": "app/annotation/dynamic/page.js",
+  "/my-tasks/page": "app/my-tasks/page.js",
+  "/review/complete/page": "app/review/complete/page.js"
+}

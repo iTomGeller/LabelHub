@@ -1,0 +1,30 @@
+{
+  "name": "assignment-policy",
+  "version": "1.0",
+  "description": "任务分发和人员负载建议规则 - 成员B的AssignmentAgent使用此Skill",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "taskId": { "type": "string" }
+    },
+    "required": ["taskId"]
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "recommendedLabelerIds": { "type": "array", "items": { "type": "string" } },
+      "slaAlerts": { "type": "array" },
+      "metadata": { "type": "object" }
+    }
+  },
+  "examples": [
+    {
+      "input": {"taskId": "task-001"},
+      "output": {
+        "recommendedLabelerIds": ["user-1", "user-2"],
+        "slaAlerts": [],
+        "metadata": {"totalLabelers": 2}
+      }
+    }
+  ]
+}

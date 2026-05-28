@@ -1,0 +1,13 @@
+package com.labelhub.entity;
+
+public enum WorkflowEventType {
+    ITEM_ASSIGNED,
+    ANNOTATION_UPDATED,
+    ANNOTATION_SUBMITTED,
+    AI_REVIEW_STARTED,
+    AI_REVIEW_COMPLETED,
+    REVIEW_STARTED,
+    REVIEW_PASSED_EVENT,
+    REVIEW_REJECTED_EVENT,
+    ITEM_REOPENED
+}
