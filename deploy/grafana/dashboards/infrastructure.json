@@ -1,0 +1,164 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 300,
+      "title": "HTTP 层",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "lineWidth": 2 } } },
+      "gridPos": { "h": 7, "w": 6, "x": 0, "y": 1 },
+      "id": 41,
+      "title": "HTTP 请求速率 (by URI)",
+      "type": "timeseries",
+      "targets": [{ "expr": "sum(rate(http_server_requests_seconds_count[5m])) by (uri)", "legendFormat": "{{uri}}" }]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "lineWidth": 2, "lineStyle": { "fill": "solid" } } } },
+      "gridPos": { "h": 7, "w": 6, "x": 6, "y": 1 },
+      "id": 42,
+      "title": "HTTP 4xx 错误率",
+      "type": "timeseries",
+      "targets": [{ "expr": "sum(rate(http_server_requests_seconds_count{status=~\"4..\"}[5m]))", "legendFormat": "4xx/s" }]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "lineWidth": 2 } } },
+      "gridPos": { "h": 7, "w": 6, "x": 12, "y": 1 },
+      "id": 43,
+      "title": "HTTP 5xx 错误率",
+      "type": "timeseries",
+      "targets": [{ "expr": "sum(rate(http_server_requests_seconds_count{status=~\"5..\"}[5m]))", "legendFormat": "5xx/s" }]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1, "thresholds": { "steps": [{"color": "red", "value": null}, {"color": "orange", "value": 0.99}, {"color": "green", "value": 0.995}] } } },
+      "gridPos": { "h": 7, "w": 6, "x": 18, "y": 1 },
+      "id": 44,
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "title": "服务可用性 SLO (30m)",
+      "type": "gauge",
+      "targets": [{ "expr": "1 - (sum(rate(http_server_requests_seconds_count{status=~\"5..\"}[30m])) / sum(rate(http_server_requests_seconds_count[30m])))", "legendFormat": "availability" }]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s", "custom": { "lineWidth": 2 } } },
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 8 },
+      "id": 45,
+      "title": "HTTP 响应延迟 p95 (by URI)",
+      "type": "timeseries",
+      "targets": [{ "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket[5m])) by (le, uri))", "legendFormat": "{{uri}} p95" }]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" } },
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 8 },
+      "id": 46,
+      "title": "HTTP 请求状态码分布",
+      "type": "timeseries",
+      "targets": [{ "expr": "sum(rate(http_server_requests_seconds_count[5m])) by (status)", "legendFormat": "{{status}}" }]
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 15 },
+      "id": 301,
+      "title": "JVM / 系统资源",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1, "custom": { "lineWidth": 2 } } },
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 16 },
+      "id": 47,
+      "title": "CPU 使用率",
+      "type": "timeseries",
+      "targets": [
+        { "expr": "process_cpu_usage", "legendFormat": "process" },
+        { "expr": "system_cpu_usage", "legendFormat": "system" }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "bytes", "custom": { "lineWidth": 2 } } },
+      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 16 },
+      "id": 48,
+      "title": "JVM 堆内存",
+      "type": "timeseries",
+      "targets": [
+        { "expr": "jvm_memory_used_bytes{area=\"heap\"}", "legendFormat": "used" },
+        { "expr": "jvm_memory_committed_bytes{area=\"heap\"}", "legendFormat": "committed" },
+        { "expr": "jvm_memory_max_bytes{area=\"heap\"}", "legendFormat": "max" }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "bytes", "custom": { "lineWidth": 2 } } },
+      "gridPos": { "h": 6, "w": 6, "x": 12, "y": 16 },
+      "id": 49,
+      "title": "JVM 非堆内存",
+      "type": "timeseries",
+      "targets": [
+        { "expr": "jvm_memory_used_bytes{area=\"nonheap\"}", "legendFormat": "used" },
+        { "expr": "jvm_memory_committed_bytes{area=\"nonheap\"}", "legendFormat": "committed" }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s", "custom": { "lineWidth": 2 } } },
+      "gridPos": { "h": 6, "w": 6, "x": 18, "y": 16 },
+      "id": 50,
+      "title": "GC 暂停时间",
+      "type": "timeseries",
+      "targets": [{ "expr": "rate(jvm_gc_pause_seconds_sum[5m])", "legendFormat": "{{action}} {{cause}}" }]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "custom": { "lineWidth": 2 } } },
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 22 },
+      "id": 51,
+      "title": "活跃线程数",
+      "type": "timeseries",
+      "targets": [
+        { "expr": "jvm_threads_live_threads", "legendFormat": "live" },
+        { "expr": "jvm_threads_daemon_threads", "legendFormat": "daemon" },
+        { "expr": "jvm_threads_peak_threads", "legendFormat": "peak" }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s", "thresholds": { "steps": [{"color": "green", "value": null}] } } },
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 22 },
+      "id": 52,
+      "options": { "colorMode": "value", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "title": "服务 Uptime",
+      "type": "stat",
+      "targets": [{ "expr": "process_uptime_seconds", "legendFormat": "uptime" }]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "thresholds": { "steps": [{"color": "green", "value": null}, {"color": "orange", "value": 5}, {"color": "red", "value": 20}] } } },
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 22 },
+      "id": 53,
+      "options": { "colorMode": "background", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "title": "Log 错误计数",
+      "type": "stat",
+      "targets": [{ "expr": "sum(logback_events_total{level=\"error\"})", "legendFormat": "errors" }]
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["labelhub", "infrastructure"],
+  "templating": { "list": [] },
+  "time": { "from": "now-1h", "to": "now" },
+  "title": "LabelHub - 基础设施",
+  "uid": "labelhub-infrastructure"
+}

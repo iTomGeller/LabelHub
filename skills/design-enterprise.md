@@ -1,7 +1,14 @@
 ---
 name: design-enterprise
-version: 0.1.0
-description: LabelHub enterprise console UI rules.
+version: 0.2.0
+description: LabelHub enterprise quality rules and rubric validation.
+triggers:
+  - rubric_generator
+  - quality_check
+outputSchema:
+  - rubricFindings
+  - coverageGaps
+  - confidence
 ---
 
 # LabelHub Enterprise Design Skill

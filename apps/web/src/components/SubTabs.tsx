@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 export interface Tab {
   key: string;
@@ -11,21 +11,38 @@ export interface Tab {
 export function SubTabs({
   tabs,
   defaultTab,
-  children
+  activeTab: controlledTab,
+  onTabChange,
+  children,
 }: {
   tabs: Tab[];
   defaultTab?: string;
+  activeTab?: string;
+  onTabChange?: (tab: string) => void;
   children: (activeTab: string) => React.ReactNode;
 }) {
-  const [active, setActive] = useState(defaultTab ?? tabs[0]?.key ?? "");
+  const [internalActive, setInternalActive] = useState(defaultTab ?? tabs[0]?.key ?? "");
+  const isControlled = controlledTab !== undefined;
+  const active = isControlled ? controlledTab : internalActive;
+
+  useEffect(() => {
+    if (isControlled && controlledTab && tabs.some((tab) => tab.key === controlledTab)) {
+      setInternalActive(controlledTab);
+    }
+  }, [controlledTab, isControlled, tabs]);
+
+  function handleSelect(tabKey: string) {
+    setInternalActive(tabKey);
+    onTabChange?.(tabKey);
+  }
 
   return (
-    <div className="space-y-5">
-      <nav className="flex gap-1 rounded-2xl border border-primary/10 bg-surface p-1">
+    <div className="space-y-5 min-w-0">
+      <nav className="flex flex-wrap gap-1 rounded-2xl border border-primary/10 bg-surface p-1">
         {tabs.map((tab) => (
           <button
             key={tab.key}
-            onClick={() => setActive(tab.key)}
+            onClick={() => handleSelect(tab.key)}
             className={`flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold transition-colors ${
               active === tab.key
                 ? "bg-white text-primary shadow-sm"
@@ -53,14 +70,14 @@ export function SubTabs({
 export function SearchFilter({
   placeholder,
   value,
-  onChange
+  onChange,
 }: {
   placeholder: string;
   value: string;
   onChange: (val: string) => void;
 }) {
   return (
-    <div className="relative">
+    <div className="relative min-w-0">
       <svg
         className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink/40"
         fill="none"

@@ -1,0 +1,182 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 200,
+      "title": "任务生命周期",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "thresholds": { "steps": [{"color": "blue", "value": null}] } } },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 1 },
+      "id": 21,
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "title": "草稿任务",
+      "type": "stat",
+      "targets": [{ "expr": "task_lifecycle{status=\"draft\"}", "legendFormat": "draft" }]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "thresholds": { "steps": [{"color": "green", "value": null}] } } },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 1 },
+      "id": 22,
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "title": "进行中任务",
+      "type": "stat",
+      "targets": [{ "expr": "task_lifecycle{status=\"publishing\"}", "legendFormat": "publishing" }]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "thresholds": { "steps": [{"color": "orange", "value": null}] } } },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 1 },
+      "id": 23,
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "title": "已暂停任务",
+      "type": "stat",
+      "targets": [{ "expr": "task_lifecycle{status=\"paused\"}", "legendFormat": "paused" }]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "thresholds": { "steps": [{"color": "purple", "value": null}] } } },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 1 },
+      "id": 24,
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "title": "已结束任务",
+      "type": "stat",
+      "targets": [{ "expr": "task_lifecycle{status=\"ended\"}", "legendFormat": "ended" }]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "custom": { "lineWidth": 2 } } },
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 5 },
+      "id": 25,
+      "title": "任务状态流转趋势",
+      "type": "timeseries",
+      "targets": [
+        { "expr": "task_lifecycle{status=\"draft\"}", "legendFormat": "草稿" },
+        { "expr": "task_lifecycle{status=\"publishing\"}", "legendFormat": "进行中" },
+        { "expr": "task_lifecycle{status=\"paused\"}", "legendFormat": "已暂停" },
+        { "expr": "task_lifecycle{status=\"ended\"}", "legendFormat": "已结束" }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "thresholds": { "steps": [{"color": "green", "value": null}] } } },
+      "gridPos": { "h": 6, "w": 6, "x": 12, "y": 5 },
+      "id": 26,
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "title": "今日新建任务",
+      "type": "stat",
+      "targets": [{ "expr": "increase(task_lifecycle{status=\"draft\"}[24h])", "legendFormat": "new" }]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "thresholds": { "steps": [{"color": "green", "value": null}] } } },
+      "gridPos": { "h": 6, "w": 6, "x": 18, "y": 5 },
+      "id": 27,
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "title": "今日发布任务",
+      "type": "stat",
+      "targets": [{ "expr": "increase(task_publish_total[24h])", "legendFormat": "published" }]
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 11 },
+      "id": 201,
+      "title": "标注流水线耗时",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s", "custom": { "lineWidth": 2 } } },
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 12 },
+      "id": 28,
+      "title": "各阶段平均耗时",
+      "type": "barchart",
+      "targets": [{ "expr": "rate(task_pipeline_duration_seconds_sum[5m]) / rate(task_pipeline_duration_seconds_count[5m])", "legendFormat": "{{stage}}", "format": "table", "instant": true }]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s", "custom": { "lineWidth": 2 } } },
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 12 },
+      "id": 29,
+      "title": "端到端流水线耗时趋势",
+      "type": "timeseries",
+      "targets": [{ "expr": "sum(rate(task_pipeline_duration_seconds_sum[5m])) / sum(rate(task_pipeline_duration_seconds_count[5m]))", "legendFormat": "end-to-end avg" }]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1, "thresholds": { "steps": [{"color": "red", "value": null}, {"color": "orange", "value": 0.7}, {"color": "green", "value": 0.9}] } } },
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 12 },
+      "id": 30,
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "title": "发布检查通过率",
+      "type": "gauge",
+      "targets": [{ "expr": "sum(agent_invocations_total{agent=\"publish-check\",outcome=\"success\"}) / sum(agent_invocations_total{agent=\"publish-check\"})", "legendFormat": "pass_rate" }]
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 19 },
+      "id": 202,
+      "title": "数据质量",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": {} },
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 20 },
+      "id": 31,
+      "title": "Schema 风险分布",
+      "type": "piechart",
+      "targets": [
+        { "expr": "sum(agent_invocations_total{agent=\"schema-risk\",outcome=\"success\"})", "legendFormat": "通过" },
+        { "expr": "sum(agent_invocations_total{agent=\"schema-risk\",outcome=\"error\"})", "legendFormat": "风险" },
+        { "expr": "sum(agent_invocations_total{agent=\"schema-risk\",outcome=\"fallback\"})", "legendFormat": "降级" }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "thresholds": { "steps": [{"color": "green", "value": null}, {"color": "orange", "value": 5}, {"color": "red", "value": 20}] } } },
+      "gridPos": { "h": 7, "w": 4, "x": 8, "y": 20 },
+      "id": 32,
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "title": "数据集重复率 (%)",
+      "type": "stat",
+      "targets": [{ "expr": "sum(agent_confidence{agent=\"dataset-profile\"}) / sum(agent_confidence_count{agent=\"dataset-profile\"}) * 100", "legendFormat": "dup_rate" }]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "thresholds": { "steps": [{"color": "green", "value": null}, {"color": "orange", "value": 10}, {"color": "red", "value": 30}] } } },
+      "gridPos": { "h": 7, "w": 4, "x": 12, "y": 20 },
+      "id": 33,
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "title": "空字段率 (%)",
+      "type": "stat",
+      "targets": [{ "expr": "sum(agent_cascade_failure_total{agent=\"dataset-profile\"})", "legendFormat": "empty_fields" }]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": {} },
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 20 },
+      "id": 34,
+      "title": "质检规则违规 TOP5",
+      "type": "table",
+      "targets": [{ "expr": "topk(5, sum(agent_invocations_total{outcome=\"error\"}) by (agent))", "legendFormat": "{{agent}}", "format": "table", "instant": true }],
+      "transformations": [{ "id": "organize", "options": { "excludeByName": { "Time": true } } }]
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["labelhub", "business"],
+  "templating": { "list": [] },
+  "time": { "from": "now-6h", "to": "now" },
+  "title": "LabelHub - 业务流水线",
+  "uid": "labelhub-business-pipeline"
+}

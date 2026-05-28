@@ -1,5 +1,7 @@
 package com.labelhub.task.controller;
 
+import com.labelhub.task.service.AgentMetrics;
+import com.labelhub.task.service.AgentPipelineService;
 import com.labelhub.task.service.DeepSeekService;
 import com.labelhub.task.service.DeepSeekService.GenerateTaskConfigRequest;
 import com.labelhub.task.service.DeepSeekService.GenerateTaskConfigResponse;
@@ -13,9 +15,13 @@ import java.util.Map;
 @RequestMapping("/agents")
 public class AiGenerateController {
     private final DeepSeekService deepSeekService;
+    private final AgentMetrics agentMetrics;
+    private final AgentPipelineService agentPipelineService;
 
-    public AiGenerateController(DeepSeekService deepSeekService) {
+    public AiGenerateController(DeepSeekService deepSeekService, AgentMetrics agentMetrics, AgentPipelineService agentPipelineService) {
         this.deepSeekService = deepSeekService;
+        this.agentMetrics = agentMetrics;
+        this.agentPipelineService = agentPipelineService;
     }
 
     @GetMapping("/health")
@@ -25,6 +31,19 @@ public class AiGenerateController {
                 "model", "deepseek-chat",
                 "api_key_set", deepSeekService.isEnabled() ? "yes" : "no"
         );
+    }
+
+    @GetMapping("/metrics-summary")
+    public Map<String, String> metricsSummary() {
+        return Map.of(
+                "calls", String.valueOf(deepSeekService.getTotalCalls()),
+                "latency", deepSeekService.getAverageLatency()
+        );
+    }
+
+    @GetMapping("/overview")
+    public Map<String, AgentMetrics.AgentStat> agentsOverview() {
+        return agentMetrics.getOverview();
     }
 
     public record GenerateRequest(
@@ -37,12 +56,61 @@ public class AiGenerateController {
 
     @PostMapping("/generate-task-config")
     public ResponseEntity<GenerateTaskConfigResponse> generateTaskConfig(@RequestBody GenerateRequest request) {
+        agentMetrics.recordPipelineStage("config-gen-start", 0);
         var result = deepSeekService.generateTaskConfig(new GenerateTaskConfigRequest(
                 request.taskId() != null ? request.taskId() : "task_" + System.currentTimeMillis(),
                 request.taskName() != null ? request.taskName() : "",
                 request.instruction() != null ? request.instruction() : "",
                 request.sampleData() != null ? request.sampleData() : List.of()
         ));
+        agentMetrics.recordTaskStatusChange("draft");
+        return ResponseEntity.ok(result);
+    }
+
+    public record SampleDataRequest(String taskName, String instruction, Integer count) {}
+    public record SampleDataResponse(List<Map<String, Object>> sampleData, String message) {}
+
+    @PostMapping("/generate-sample-data")
+    public ResponseEntity<SampleDataResponse> generateSampleData(@RequestBody SampleDataRequest request) {
+        agentMetrics.recordPipelineStage("sample-gen-start", 0);
+        int count = request.count() != null ? Math.max(1, Math.min(20, request.count())) : 6;
+        String ragContext = agentPipelineService.buildCompactRagContext();
+        var samples = deepSeekService.generateSampleData(
+                request.taskName() != null ? request.taskName() : "未命名任务",
+                request.instruction(),
+                count,
+                ragContext
+        );
+        return ResponseEntity.ok(new SampleDataResponse(samples,
+                "已根据任务「" + request.taskName() + "」生成 " + samples.size() + " 条样例数据"));
+    }
+
+    public record PipelineRequest(String taskName, String instruction, List<Map<String, Object>> sampleData) {}
+
+    @PostMapping("/pipeline")
+    public ResponseEntity<AgentPipelineService.PipelineResponse> executePipeline(@RequestBody PipelineRequest request) {
+        agentMetrics.recordPipelineStage("pipeline-request", 0);
+        var result = agentPipelineService.executePipeline(new AgentPipelineService.PipelineRequest(
+                request.taskName() != null ? request.taskName() : "",
+                request.instruction() != null ? request.instruction() : "",
+                request.sampleData() != null ? request.sampleData() : List.of()
+        ));
+        return ResponseEntity.ok(result);
+    }
+
+    public record GenerateFieldsRequest(String taskName, String instruction, List<String> existingFields, List<Map<String, Object>> sampleData, Integer count) {}
+
+    @PostMapping("/generate-fields")
+    public ResponseEntity<DeepSeekService.AiGenerateFieldResult> generateFields(@RequestBody GenerateFieldsRequest request) {
+        agentMetrics.recordPipelineStage("field-gen-start", 0);
+        String ragContext = agentPipelineService.buildCompactRagContext();
+        var result = deepSeekService.generateField(
+                request.taskName() != null ? request.taskName() : "未命名任务",
+                request.instruction(),
+                request.existingFields() != null ? request.existingFields() : List.of(),
+                request.sampleData() != null ? request.sampleData() : List.of(),
+                ragContext
+        );
         return ResponseEntity.ok(result);
     }
 }

@@ -128,9 +128,30 @@ C 审核界面 → 审核员质检打分
 - `.env` 文件已加入 `.gitignore`
 - 接口鉴权预留 JWT 方案（当前开发阶段暂未启用）
 
-## 7. 扩展性设计
+## 7. 多 Agent DAG 架构
+
+A 模块在任务发布前使用 7-stage 多 Agent 流水线进行智能审核：
+
+```
+TaskContextBuilder → SkillLoader → DatasetSampler → SchemaGenerator → RubricGenerator → Critic → TaskPackageWriter
+```
+
+**设计要点**:
+- 每个 Agent 独立职责，通过 `AgentPipelineService` 串行编排
+- SkillLoader 从 `skills/` 目录加载 Markdown 技能文件，注入为 RAG 上下文
+- SchemaGenerator 和 DatasetSampler 调用 DeepSeek Chat API
+- Critic 综合评审所有产出，输出置信度和问题列表
+- 每个 stage 记录 Micrometer metrics（调用次数、延迟、成功率）
+- 前端展示自然语言摘要，技术详情可选查看
+- DAG 结果作为发布卡点：不通过则禁止发布
+
+详见: [多 Agent Pipeline 设计文档](multi-agent-pipeline.md)
+
+## 8. 扩展性设计
 
 - DeepSeek 调用通过 `DeepSeekService` 封装，可替换为其他 LLM
 - Schema 组件类型通过枚举扩展
 - B/C 模块通过标准 REST 接口对接，无代码耦合
 - 任务状态机支持 draft → publishing → paused → ended 全生命周期
+- Pipeline 新增 Agent 只需在 `executePipeline()` 中添加 stage，前端自动渲染
+- SkillLoader 预留 MCP/外部 RAG 扩展点

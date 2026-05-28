@@ -28,3 +28,7 @@ deepseek:
   api-key: ${DEEPSEEK_API_KEY:}
   base-url: ${DEEPSEEK_BASE_URL:https://api.deepseek.com}
   model: deepseek-chat
+
+labelhub:
+  knowledge:
+    seed-enabled: ${LABELHUB_KNOWLEDGE_SEED_ENABLED:true}

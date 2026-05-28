@@ -150,6 +150,27 @@ A 发布后产出标准 TaskPackage JSON，B/C 通过 `GET /api/tasks/{id}/packa
 
 > 详细的 AI Coding 过程记录参见 [`docs/ai-coding-process.md`](ai-coding-process.md)
 
+### Sprint 6: 全步骤 AI 辅助 + 多 Agent DAG
+
+- Step 2（配置模板）增加 AI 智能生成按钮
+- Step 3（质检规则）增加 AI 智能生成按钮
+- Step 1 AI 一键配置增强：若无样例先生成样例，再生成全部配置，直接跳发布
+- 后端新增 `AgentPipelineService`，实现 7-stage DAG 编排
+- 新增 `/agents/pipeline` 端点
+- Step 4 发布页新增多 Agent DAG 校验面板
+
+### Sprint 7: DAG 详情 + UX 打磨 + 文档
+
+- DAG 每个 stage 输出丰富化：自然语言摘要 + 业务语言 + accordion 详情
+- DAG 作为发布卡点：自动触发，不通过则禁止发布
+- SkillLoader 实际读取 skills/ 目录 Markdown 文件，注入 RAG 上下文
+- PipelineLog 记录 prompt/skill/model 信息
+- SettingsView 移除链路追踪 tab
+- 导出格式扩展：JSON/JSONL/CSV/Markdown
+- TaskList 配置进度语义化（步骤 1/4: 数据上传）
+- README 全面更新（含 Mermaid 架构图和 Agent 说明）
+- 新增 `docs/multi-agent-pipeline.md`
+
 ## 9. 后续规划
 
 - [ ] 任务数据持久化（MySQL）
@@ -157,3 +178,6 @@ A 发布后产出标准 TaskPackage JSON，B/C 通过 `GET /api/tasks/{id}/packa
 - [ ] JWT 鉴权
 - [ ] WebSocket 实时通知
 - [ ] 任务状态机完善
+- [ ] Pipeline 并行执行优化（CompletableFuture）
+- [ ] 外部 MCP Server 集成
+- [ ] RAG 知识库检索增强
