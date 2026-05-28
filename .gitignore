@@ -18,3 +18,9 @@ __pycache__/
 *.egg-info/
 .venv/
 venv/
+.idea/
+.vscode/
+target/
+MEMBER_B_DELIVERABLE.md
+labelhub_team_plan.md
+apps/api/IDEA_ENV_CONFIG.md
