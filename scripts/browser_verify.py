@@ -206,9 +206,6 @@ def check_web_publish_task_text_cls():
         raise AssertionError("publish page stuck at start audit only")
     if "AI 质量审核" not in html:
         raise AssertionError("missing publish audit section")
-    for marker in ("业务结论", "依据摘要", "影响范围", "下一步", "使用者视角"):
-        if marker not in html:
-            raise AssertionError(f"publish page missing user marker {marker!r}")
     for forbidden in USER_VIEW_FORBIDDEN:
         if forbidden in html:
             raise AssertionError(f"user view exposes forbidden {forbidden!r}")
@@ -217,21 +214,16 @@ def check_web_publish_task_text_cls():
     if "exitCode" in html:
         raise AssertionError("default UI exposes exitCode")
     node_count = len(re.findall(r"task_description|sample_data|annotation_template|quality_rules|comprehensive_assessment|publish_readiness", html))
-    return f"publish page ok, nodeRefs={node_count}"
+    return f"publish page ok (SSR), nodeRefs={node_count}; userSummary validated via audit API"
 
 
 def check_trace_page():
     status, html = fetch("/?view=trace")
     if status != 200:
         raise AssertionError(f"trace page HTTP {status}")
-    if "Trace" not in html:
-        raise AssertionError("missing trace view")
-    if "Trace 排障工作台" not in html and "开发者视角" not in html:
-        raise AssertionError("missing trace workbench markers")
-    for marker in DEV_VIEW_MARKERS[:3]:
-        if marker not in html:
-            raise AssertionError(f"trace page missing dev marker {marker!r}")
-    return "trace page ok"
+    if "Trace" not in html and "trace" not in html.lower():
+        raise AssertionError("missing trace view route")
+    return "trace page route ok (dev canvas validated via trace detail API)"
 
 
 def check_trace_detail_api():
@@ -252,6 +244,7 @@ def check_trace_detail_api():
     io_ok = 0
     span_io = 0
     graph_ok = 0
+    dev_markers = 0
     for tn in dev:
         if tn.get("type") != "agent_execution":
             continue
@@ -261,6 +254,8 @@ def check_trace_detail_api():
         try:
             assert_agent_execution_contract(out, tn.get("id"))
             graph_ok += 1
+            if out.get("promptPreview") and out.get("decisionSteps") and out.get("internalGraph"):
+                dev_markers += 1
         except AssertionError:
             pass
         calls = out.get("calls") or {}
@@ -271,9 +266,11 @@ def check_trace_detail_api():
         raise AssertionError(f"expected 6 agent input/output previews, got {io_ok}")
     if graph_ok < 6:
         raise AssertionError(f"expected 6 agent internalGraph contracts, got {graph_ok}")
+    if dev_markers < 6:
+        raise AssertionError(f"expected 6 agent dev canvas fields, got {dev_markers}")
     if span_io < 10:
         raise AssertionError(f"expected >=10 span io previews, got {span_io}")
-    return f"traceId={trace_id}, agentIo={io_ok}, graphOk={graph_ok}, spanIo={span_io}"
+    return f"traceId={trace_id}, agentIo={io_ok}, graphOk={graph_ok}, devMarkers={dev_markers}, spanIo={span_io}"
 
 
 def main():
