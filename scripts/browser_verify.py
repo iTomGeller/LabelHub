@@ -2,6 +2,7 @@
 import io
 import json
 import re
+import subprocess
 import sys
 import urllib.request
 
@@ -28,7 +29,12 @@ REQUIRED_AGENT_OUTPUT_FIELDS = [
     "promptPreview", "decisionSteps", "internalGraph", "businessMapping",
 ]
 USER_VIEW_FORBIDDEN = ["Prompt 输入", "knowledge_base", "exitCode", "task_context_builder"]
-DEV_VIEW_MARKERS = ["Agent 执行画布", "Prompt 输入", "决策轮次", "调用证据", "Agent 输出"]
+UI_BUNDLE_MARKERS = [
+    "business-conclusion-drawer",
+    "agent-trace-drawer",
+    "call-io-card",
+    "Agent 排障抽屉",
+]
 
 
 def fetch(path, method="GET", body=None, timeout=120):
@@ -61,11 +67,53 @@ def assert_span_contract(span, node_key):
             raise AssertionError(f"rag span missing topChunks/emptyReason on {node_key}")
     if kind in ("tool", "sandbox") and not inp.get("checkTarget"):
         raise AssertionError(f"{kind} span missing checkTarget input on {node_key}")
+    if kind == "skill":
+        if not inp.get("skillName"):
+            raise AssertionError(f"skill span missing skillName input on {node_key}")
+        if "findingCount" not in out and "findings" not in out and "status" not in out:
+            raise AssertionError(f"skill span missing output fields on {node_key}")
     if kind == "mcp" and not inp.get("server"):
         raise AssertionError(f"mcp span missing server input on {node_key}")
 
 
-def assert_agent_execution_contract(out, node_id):
+def _collect_js_chunks(html: str, limit=20):
+    return list(dict.fromkeys(re.findall(r"/_next/static/chunks/[^\"']+\.js", html)))[:limit]
+
+
+def check_ui_bundle_drawer_markers():
+    _, html = fetch("/?view=trace")
+    chunks = _collect_js_chunks(html)
+    if not chunks:
+        raise AssertionError("no next.js chunks found on trace page")
+    blob = ""
+    for chunk in chunks:
+        _, js = fetch(chunk)
+        blob += js
+    missing = [m for m in UI_BUNDLE_MARKERS if m not in blob]
+    if missing:
+        raise AssertionError(f"bundle missing drawer markers: {missing}")
+    return f"markers={len(UI_BUNDLE_MARKERS)}, chunks={len(chunks)}"
+
+
+def check_ui_drawer_playwright():
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent
+    try:
+        proc = subprocess.run(
+            ["node", "scripts/ui_drawer_verify.mjs", BASE],
+            capture_output=True,
+            text=True,
+            timeout=180,
+            cwd=str(root),
+        )
+    except FileNotFoundError:
+        return "skipped (node not available)"
+    out = (proc.stdout or "") + (proc.stderr or "")
+    if proc.returncode == 0 and "OK ui drawer smoke" in out:
+        return "playwright drawer smoke passed"
+    if "SKIP playwright not installed" in out:
+        return "skipped (playwright not installed)"
+    raise AssertionError(out.strip() or f"exit {proc.returncode}")
     missing = [f for f in REQUIRED_AGENT_OUTPUT_FIELDS if f not in out]
     if missing:
         raise AssertionError(f"agent node {node_id} outputPreview missing: {missing}")
@@ -156,6 +204,7 @@ def check_task_text_cls_audit():
 
     rag_hits = 0
     span_total = 0
+    skill_spans = 0
     blob = json.dumps(nodes, ensure_ascii=False)
     for node in nodes:
         node_key = node.get("nodeKey")
@@ -174,6 +223,8 @@ def check_task_text_cls_audit():
         for span in spans:
             assert_span_contract(span, node_key)
             span_total += 1
+            if span.get("kind") == "skill":
+                skill_spans += 1
 
     agent_exec = 0
     for tn in dev_nodes:
@@ -196,8 +247,11 @@ def check_task_text_cls_audit():
     if matched < 4:
         raise AssertionError(f"expected business terms in output, matched {matched}")
 
+    if skill_spans < 1:
+        raise AssertionError(f"expected >=1 skill span with io, got {skill_spans}")
+
     trace_id = data.get("traceId")
-    return f"traceId={trace_id}, ragHits={rag_hits}, spans={span_total}, terms={matched}"
+    return f"traceId={trace_id}, ragHits={rag_hits}, spans={span_total}, skillSpans={skill_spans}, terms={matched}"
 
 
 def check_web_publish_task_text_cls():
@@ -291,6 +345,8 @@ def main():
     run("web publish task_text_cls_001 user view", check_web_publish_task_text_cls)
     run("trace page dev view", check_trace_page)
     run("trace detail io + internalGraph api", check_trace_detail_api)
+    run("ui bundle drawer markers", check_ui_bundle_drawer_markers)
+    run("ui drawer playwright smoke", check_ui_drawer_playwright)
 
     print(f"\n产品验收: {sum(checks)}/{len(checks)} 通过")
     sys.exit(0 if all(checks) else 1)

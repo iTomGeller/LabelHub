@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { agentLabel, nodeLabel } from "@/lib/diagnosticLabels";
 import { KeyValueViewer } from "./KeyValueViewer";
 import { Pagination, paginateSlice } from "./Pagination";
@@ -40,6 +40,7 @@ const TYPE_ZH: Record<string, string> = {
   output: "Agent 输出",
 };
 
+const CALL_TYPES = new Set(["rag", "skill", "mcp", "tool", "sandbox"]);
 const NODES_PER_PAGE = 8;
 
 function laneForType(type: string): number {
@@ -56,6 +57,16 @@ function laneForType(type: string): number {
   }
 }
 
+function defaultSelectedNodeId(nodes: InternalGraphNode[]): string | null {
+  const callNode = nodes.find((n) => CALL_TYPES.has(n.type));
+  if (callNode) return callNode.id;
+  const decision = nodes.find((n) => n.type === "decision");
+  if (decision) return decision.id;
+  const output = nodes.find((n) => n.type === "output");
+  if (output) return output.id;
+  return nodes[0]?.id ?? null;
+}
+
 interface Props {
   internalGraph?: {
     nodes?: InternalGraphNode[];
@@ -67,12 +78,18 @@ interface Props {
 }
 
 export function AgentInternalGraph({ internalGraph, decisionSteps = [], compact }: Props) {
+  const nodes = useMemo(() => internalGraph?.nodes ?? [], [internalGraph?.nodes]);
+  const edges = useMemo(() => internalGraph?.edges ?? [], [internalGraph?.edges]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [nodePage, setNodePage] = useState(1);
   const [decisionPage, setDecisionPage] = useState(1);
 
-  const nodes = internalGraph?.nodes || [];
-  const edges = internalGraph?.edges || [];
+  useEffect(() => {
+    setSelectedId(defaultSelectedNodeId(nodes));
+    setNodePage(1);
+    setDecisionPage(1);
+  }, [nodes]);
+
   const selected = nodes.find((n) => n.id === selectedId) || null;
 
   const layout = useMemo(() => {
@@ -103,7 +120,7 @@ export function AgentInternalGraph({ internalGraph, decisionSteps = [], compact 
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-2">
         <div>
-          <p className="text-xs font-bold text-primary">Agent 执行画布</p>
+          <p className="text-xs font-bold text-primary">Agent 执行子图</p>
           {!compact && internalGraph?.businessNode && (
             <p className="text-[10px] text-ink/50">负责业务维度：{nodeLabel(internalGraph.businessNode)}</p>
           )}
@@ -111,81 +128,76 @@ export function AgentInternalGraph({ internalGraph, decisionSteps = [], compact 
         <Pagination page={nodePaged.page} totalPages={nodePaged.totalPages} onPageChange={setNodePage} label="子图节点" />
       </div>
 
-      <div className="overflow-x-auto rounded-xl border border-primary/10 bg-white p-4">
-        <svg width={width} height={height} className="min-w-[640px]">
-          <defs>
-            <marker id="ig-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
-              <path d="M0,0 L8,4 L0,8 Z" fill="#94a3b8" />
-            </marker>
-          </defs>
-          {edges.map((e, i) => {
-            const from = layout.find((n) => n.id === e.from);
-            const to = layout.find((n) => n.id === e.to);
-            if (!from || !to || !visibleIds.has(from.id) || !visibleIds.has(to.id)) return null;
-            const x1 = from.x + 140;
-            const y1 = from.y + 28;
-            const x2 = to.x;
-            const y2 = to.y + 28;
-            return (
-              <line
-                key={`${e.from}-${e.to}-${i}`}
-                x1={x1}
-                y1={y1}
-                x2={x2}
-                y2={y2}
-                stroke="#cbd5e1"
-                strokeWidth={1.5}
-                markerEnd="url(#ig-arrow)"
-              />
-            );
-          })}
-          {nodePaged.items.map((n) => {
-            const style = TYPE_STYLES[n.type] || TYPE_STYLES.tool;
-            const active = selectedId === n.id;
-            return (
-              <g key={n.id} transform={`translate(${n.x}, ${n.y})`} className="cursor-pointer" onClick={() => setSelectedId(n.id)}>
-                <rect
-                  width={140}
-                  height={56}
-                  rx={12}
-                  className={`${style.bg} ${active ? "stroke-accent stroke-2" : style.border} fill-current`}
-                  fill="white"
-                  strokeWidth={active ? 2 : 1}
+      <div className="grid gap-4 lg:grid-cols-[1fr_280px]">
+        <div className="overflow-x-auto rounded-xl border border-primary/10 bg-white p-4 min-w-0">
+          <svg width={width} height={height} className="min-w-[640px]">
+            <defs>
+              <marker id="ig-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+                <path d="M0,0 L8,4 L0,8 Z" fill="#94a3b8" />
+              </marker>
+            </defs>
+            {edges.map((e, i) => {
+              const from = layout.find((n) => n.id === e.from);
+              const to = layout.find((n) => n.id === e.to);
+              if (!from || !to || !visibleIds.has(from.id) || !visibleIds.has(to.id)) return null;
+              const x1 = from.x + 140;
+              const y1 = from.y + 28;
+              const x2 = to.x;
+              const y2 = to.y + 28;
+              return (
+                <line
+                  key={`${e.from}-${e.to}-${i}`}
+                  x1={x1}
+                  y1={y1}
+                  x2={x2}
+                  y2={y2}
+                  stroke="#cbd5e1"
+                  strokeWidth={1.5}
+                  markerEnd="url(#ig-arrow)"
                 />
-                <circle cx={12} cy={14} r={4} className={style.dot} fill="currentColor" />
-                <text x={22} y={16} className="text-[9px] fill-slate-400 font-bold">{TYPE_ZH[n.type] || n.type}</text>
-                <text x={12} y={34} className="text-[10px] fill-slate-800 font-bold">{n.title.length > 14 ? n.title.slice(0, 14) + "…" : n.title}</text>
-              </g>
-            );
-          })}
-        </svg>
-        <div className="flex flex-wrap gap-3 mt-2 text-[10px] text-ink/50">
-          {Object.entries(TYPE_ZH).map(([k, v]) => (
-            <span key={k} className="flex items-center gap-1">
-              <span className={`h-2 w-2 rounded-full ${(TYPE_STYLES[k] || TYPE_STYLES.tool).dot}`} />
-              {v}
-            </span>
-          ))}
+              );
+            })}
+            {nodePaged.items.map((n) => {
+              const style = TYPE_STYLES[n.type] || TYPE_STYLES.tool;
+              const active = selectedId === n.id;
+              return (
+                <g key={n.id} transform={`translate(${n.x}, ${n.y})`} className="cursor-pointer" onClick={() => setSelectedId(n.id)}>
+                  <rect
+                    width={140}
+                    height={56}
+                    rx={12}
+                    className={`${style.bg} ${active ? "stroke-accent stroke-2" : style.border}`}
+                    fill="white"
+                    strokeWidth={active ? 2 : 1}
+                  />
+                  <circle cx={12} cy={14} r={4} className={style.dot} fill="currentColor" />
+                  <text x={22} y={16} className="text-[9px] fill-slate-400 font-bold">{TYPE_ZH[n.type] || n.type}</text>
+                  <text x={12} y={34} className="text-[10px] fill-slate-800 font-bold">{n.title.length > 14 ? n.title.slice(0, 14) + "…" : n.title}</text>
+                </g>
+              );
+            })}
+          </svg>
         </div>
-      </div>
 
-      {selected && (
-        <div className="rounded-xl border border-accent/20 bg-surface/30 p-4 space-y-3">
-          <p className="text-sm font-bold text-primary">{selected.title}</p>
-          {selected.inputPreview && (
-            <div>
-              <p className="text-[10px] font-bold text-ink/40 mb-1">输入</p>
-              <KeyValueViewer data={selected.inputPreview} />
-            </div>
-          )}
-          {selected.outputPreview && (
-            <div>
-              <p className="text-[10px] font-bold text-ink/40 mb-1">输出</p>
-              <KeyValueViewer data={selected.outputPreview} />
-            </div>
-          )}
-        </div>
-      )}
+        {selected && (
+          <div className="rounded-xl border border-accent/20 bg-surface/30 p-4 space-y-3 lg:sticky lg:top-4 lg:self-start max-h-[420px] overflow-y-auto">
+            <p className="text-sm font-bold text-primary">{TYPE_ZH[selected.type] || selected.type}</p>
+            <p className="text-xs text-ink/60">{selected.title}</p>
+            {selected.inputPreview && (
+              <div>
+                <p className="text-[10px] font-bold text-ink/40 mb-1">输入</p>
+                <KeyValueViewer data={selected.inputPreview} />
+              </div>
+            )}
+            {selected.outputPreview && (
+              <div>
+                <p className="text-[10px] font-bold text-ink/40 mb-1">输出</p>
+                <KeyValueViewer data={selected.outputPreview} />
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
       {decisionSteps.length > 0 && (
         <div className="space-y-3">

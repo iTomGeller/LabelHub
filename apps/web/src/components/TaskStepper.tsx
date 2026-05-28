@@ -194,8 +194,6 @@ const COMPONENT_PRESETS: SchemaComponent[] = [
 ];
 
 import { AuditBusinessDag, type BusinessNode } from "./AuditBusinessDag";
-import { AgentTraceDag } from "./AgentTraceDag";
-import type { TraceNode } from "@/lib/traceExecution";
 
 type DagResultType = { pipelineId: string; stages: { stage: string; status: string; durationMs: number; output: Record<string, unknown>; summary: string }[]; allPassed: boolean };
 
@@ -1199,7 +1197,6 @@ function StepPublish({
   const [dagHash, setDagHash] = useState<string>("");
   const [copied, setCopied] = useState(false);
   const [businessNodes, setBusinessNodes] = useState<BusinessNode[]>([]);
-  const [traceNodes, setTraceNodes] = useState<TraceNode[]>([]);
   const [traceId, setTraceId] = useState<string>("");
   const [fromCache, setFromCache] = useState(false);
   const [currentHash, setCurrentHash] = useState("");
@@ -1209,7 +1206,6 @@ function StepPublish({
   function clearAuditState() {
     setDagResult(null);
     setBusinessNodes([]);
-    setTraceNodes([]);
     setTraceId("");
     setFromCache(false);
     setDagHash("");
@@ -1227,7 +1223,6 @@ function StepPublish({
   }, hash: string) {
     const nodes: BusinessNode[] = data.businessDag || [];
     setBusinessNodes(nodes);
-    setTraceNodes((data.developerDag || []) as TraceNode[]);
     setTraceId(data.traceId || "");
     setFromCache(data.fromCache === true);
 
@@ -1445,19 +1440,6 @@ function StepPublish({
           </div>
         )}
       </div>
-
-      {/* 开发者 Trace 工作台 */}
-      {traceNodes.length > 0 && traceId && (
-        <div className="rounded-2xl border border-primary/10 bg-white p-6 min-w-0">
-          <AgentTraceDag
-            nodes={traceNodes}
-            traceId={traceId}
-            runStatus={dagResult?.allPassed ? "success" : "warning"}
-            traceCompleteness
-            compact
-          />
-        </div>
-      )}
 
       {/* Task Package Quick Preview */}
       <div className="rounded-2xl border border-primary/10 bg-white p-6">

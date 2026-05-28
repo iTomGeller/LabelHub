@@ -7,9 +7,9 @@ import { useState } from "react";
 
 const SPANS_PER_PAGE = 3;
 
-function CallDetailCard({ row }: { row: CallRecord }) {
+export function CallIoCard({ row }: { row: CallRecord }) {
   return (
-    <div className="rounded-xl border border-primary/10 bg-surface/40 p-4 space-y-3">
+    <div className="rounded-xl border border-primary/10 bg-surface/40 p-4 space-y-3" data-testid="call-io-card">
       <div className="flex items-center justify-between gap-2">
         <div>
           <span className="text-xs font-bold text-primary">{callKindLabel(row.kind)} · {row.nameZh}</span>
@@ -18,14 +18,15 @@ function CallDetailCard({ row }: { row: CallRecord }) {
         <span className={`rounded border px-1.5 py-0.5 text-[10px] font-bold shrink-0 ${callStatusTone(row.status)}`}>{row.statusZh}</span>
       </div>
 
-      <div>
-        <p className="text-[10px] font-bold text-ink/40 mb-1">输入</p>
-        <KeyValueViewer data={row.inputPreview} />
-      </div>
-
-      <div>
-        <p className="text-[10px] font-bold text-ink/40 mb-1">输出</p>
-        <KeyValueViewer data={row.outputPreview} />
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="rounded-lg border border-primary/5 bg-white/70 p-3">
+          <p className="text-[10px] font-bold text-ink/40 mb-1">输入</p>
+          <KeyValueViewer data={row.inputPreview} maxTextLen={120} />
+        </div>
+        <div className="rounded-lg border border-primary/5 bg-white/70 p-3">
+          <p className="text-[10px] font-bold text-ink/40 mb-1">输出</p>
+          <KeyValueViewer data={row.outputPreview} maxTextLen={120} />
+        </div>
       </div>
 
       <div className="rounded-lg bg-white/70 px-3 py-2">
@@ -98,11 +99,11 @@ export function CallReportPanel({
   }
 
   return (
-    <section className="space-y-3">
+    <section className="space-y-3" data-testid="call-report-panel">
       <p className="text-xs font-bold text-ink/40">{title}</p>
       <div className="space-y-3">
         {paged.items.map((row, i) => (
-          <CallDetailCard key={`${row.id || row.kind}-${i}`} row={row} />
+          <CallIoCard key={`${row.id || row.kind}-${i}`} row={row} />
         ))}
       </div>
       {paginate && (

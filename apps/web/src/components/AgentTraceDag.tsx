@@ -92,7 +92,7 @@ export function AgentTraceDag({ nodes, traceId, runStatus, traceCompleteness, co
     return (
       <button
         type="button"
-        onClick={() => setExpandedGroup(expandedGroup === group.traceNodeId ? null : group.traceNodeId)}
+        onClick={() => setExpandedGroup(group.traceNodeId)}
         className={`absolute rounded-2xl border bg-white p-4 text-left transition hover:shadow-lg ${
           expandedGroup === group.traceNodeId ? "border-accent ring-2 ring-accent/20" : "border-primary/10"
         }`}
@@ -121,7 +121,7 @@ export function AgentTraceDag({ nodes, traceId, runStatus, traceCompleteness, co
       {!compact && (
         <div>
           <h3 className="text-lg font-bold text-primary">Trace 排障工作台</h3>
-          <p className="text-xs text-ink/50">开发者视角 — Agent 原子 DAG · 选中后展开执行画布</p>
+          <p className="text-xs text-ink/50">开发者视角 — Agent 原子 DAG · 选中后打开右侧排障抽屉</p>
         </div>
       )}
 
@@ -148,35 +148,34 @@ export function AgentTraceDag({ nodes, traceId, runStatus, traceCompleteness, co
           <p className="text-xs text-ink/40">{emptyMsg.detail}</p>
         </div>
       ) : (
-        <div className="space-y-5">
-          <div className="overflow-x-auto pb-2 min-w-0">
-            <DagCanvas
-              width={baseLayout.width}
-              height={baseLayout.height}
-              nodes={layout}
-              edges={edges}
-              nodeWidth={DEFAULT_NODE_W}
-              nodeHeight={DEFAULT_NODE_H}
-              laneLabels={narrow ? undefined : BUSINESS_DAG_LANE_LABELS}
-              laneGutter={narrow ? 0 : LANE_GUTTER_W}
-              markerPrefix="trace"
-            >
-              {visibleGroups.map((group) => {
-                const layoutItem = layout.find((l) => l.id === group.nodeKey);
-                if (!layoutItem) return null;
-                return <AgentCard key={group.traceNodeId || group.nodeKey} group={group} layoutItem={layoutItem} />;
-              })}
-            </DagCanvas>
-          </div>
-
-          {expanded && (
-            <AgentWorkflowCanvas
-              group={expanded}
-              traceId={traceId}
-              onClose={() => setExpandedGroup(null)}
-            />
-          )}
+        <div className="overflow-x-auto pb-2 min-w-0">
+          <DagCanvas
+            width={baseLayout.width}
+            height={baseLayout.height}
+            nodes={layout}
+            edges={edges}
+            nodeWidth={DEFAULT_NODE_W}
+            nodeHeight={DEFAULT_NODE_H}
+            laneLabels={narrow ? undefined : BUSINESS_DAG_LANE_LABELS}
+            laneGutter={narrow ? 0 : LANE_GUTTER_W}
+            markerPrefix="trace"
+          >
+            {visibleGroups.map((group) => {
+              const layoutItem = layout.find((l) => l.id === group.nodeKey);
+              if (!layoutItem) return null;
+              return <AgentCard key={group.traceNodeId || group.nodeKey} group={group} layoutItem={layoutItem} />;
+            })}
+          </DagCanvas>
         </div>
+      )}
+
+      {expanded && (
+        <AgentWorkflowCanvas
+          group={expanded}
+          traceId={traceId}
+          onClose={() => setExpandedGroup(null)}
+          variant="drawer"
+        />
       )}
     </div>
   );
