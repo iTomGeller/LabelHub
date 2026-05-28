@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { CallReportPanel } from "./CallReportPanel";
 import { DagCanvas, useNarrowScreen } from "./DagCanvas";
 import { Pagination, paginateSlice } from "./Pagination";
 import {
@@ -13,10 +12,11 @@ import {
   DEFAULT_NODE_W,
   LANE_GUTTER_W,
 } from "@/lib/dagLayout";
-import { businessVerdict, upstreamDownstream, verdictTone } from "@/lib/businessDagStatus";
-import { agentLabel } from "@/lib/diagnosticLabels";
+import { businessVerdict, upstreamDownstream, verdictTone, type BusinessVerdict } from "@/lib/businessDagStatus";
+import { nodeLabel } from "@/lib/diagnosticLabels";
 
 const EVIDENCE_PER_PAGE = 5;
+const IMPACT_PER_PAGE = 5;
 
 export interface BusinessNode {
   id: string;
@@ -51,15 +51,6 @@ const FIX_STEP_LABELS: Record<string, string> = {
   publish: "确认发布",
 };
 
-const STEP_LABELS: Record<string, string> = {
-  task_description: "任务说明",
-  sample_data: "样例数据",
-  annotation_template: "标注模板",
-  quality_rules: "质检规则",
-  comprehensive_assessment: "综合评估",
-  publish_readiness: "发布准备",
-};
-
 const DAG_ORDER = [
   "task_description",
   "sample_data",
@@ -69,135 +60,120 @@ const DAG_ORDER = [
   "publish_readiness",
 ];
 
-function NodeDrawer({
+function UserBusinessConclusionCanvas({
   node,
   traceId,
-  onClose,
   onJumpToStep,
 }: {
   node: BusinessNode;
   traceId?: string;
-  onClose: () => void;
   onJumpToStep?: (step: string) => void;
 }) {
-  const [tab, setTab] = useState<"conclusion" | "calls" | "tech">("conclusion");
   const [evidencePage, setEvidencePage] = useState(1);
-  const verdict = businessVerdict(node);
+  const [impactPage, setImpactPage] = useState(1);
+  const userSummary = (node.details?.userSummary || {}) as Record<string, unknown>;
+  const verdict = (String(userSummary.verdict || businessVerdict(node))) as BusinessVerdict;
   const tone = verdictTone(verdict);
-  const action = node.details?.action as Record<string, unknown> | undefined;
-  const calls = node.details?.calls as Record<string, unknown> | undefined;
   const evidenceItems = (node.details?.evidenceItems as unknown[]) || [];
   const { upstream, downstream } = upstreamDownstream(node.nodeKey);
   const evidencePaged = paginateSlice(evidenceItems, evidencePage, EVIDENCE_PER_PAGE);
 
+  const impactLines = [
+    String(userSummary.businessImpact || node.impact || "").trim(),
+    ...(node.referenceSources?.length ? [`参考来源：${node.referenceSources.join("、")}`] : []),
+  ].filter(Boolean);
+  const impactPaged = paginateSlice(impactLines, impactPage, IMPACT_PER_PAGE);
+
+  const nextStep = String(userSummary.nextStep || node.suggestion || (node.status === "success" ? "继续发布流程" : "返回对应步骤修复"));
+  const confidenceReason = String(userSummary.confidenceReason || "");
+
   return (
-    <>
-      <div className="fixed inset-0 z-40 bg-black/20" onClick={onClose} aria-hidden />
-      <aside className="fixed right-0 top-14 bottom-0 z-50 w-full max-w-lg overflow-y-auto border-l border-primary/10 bg-white shadow-2xl">
-        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-primary/10 bg-white px-5 py-4">
-          <div>
-            <p className="text-xs font-bold text-ink/40">审核报告 · {STEP_LABELS[node.nodeKey] || node.title}</p>
-            <h4 className="text-lg font-bold text-primary">{node.title}</h4>
-            <p className="text-[10px] text-ink/40 mt-1">
-              {node.durationMs}ms · 上游 {upstream.length} · 下游 {downstream.length}
-            </p>
-          </div>
-          <button onClick={onClose} className="rounded-lg px-3 py-1.5 text-sm text-ink/50 hover:bg-surface">关闭</button>
+    <div className="rounded-2xl border border-accent/20 bg-gradient-to-br from-white via-surface/20 to-accent/5 p-6 space-y-6">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-[10px] font-bold text-ink/40">业务结论画布 · {nodeLabel(node.nodeKey)}</p>
+          <h4 className="text-xl font-bold text-primary">{node.title}</h4>
+          <p className="text-xs text-ink/50 mt-1">
+            {node.durationMs}ms · 上游 {upstream.map(nodeLabel).join("、") || "无"} → 下游 {downstream.map(nodeLabel).join("、") || "无"}
+          </p>
         </div>
+        {traceId && (
+          <a
+            href={`/?view=trace&traceId=${encodeURIComponent(traceId)}`}
+            className="rounded-xl border border-primary/15 bg-white px-4 py-2 text-xs font-bold text-primary hover:bg-surface/50"
+          >
+            查看开发者 Trace →
+          </a>
+        )}
+      </div>
 
-        <div className="sticky top-[88px] z-10 flex gap-1 border-b border-primary/10 bg-white px-5 py-2">
-          {([
-            ["conclusion", "业务结论"],
-            ["calls", "调用证据"],
-            ["tech", "技术详情"],
-          ] as const).map(([key, label]) => (
-            <button
-              key={key}
-              type="button"
-              onClick={() => setTab(key)}
-              className={`rounded-lg px-3 py-1.5 text-xs font-bold ${tab === key ? "bg-accent text-white" : "text-ink/50 hover:bg-surface"}`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+      <div className="grid gap-4 lg:grid-cols-5">
+        <section className="lg:col-span-1 rounded-xl border border-primary/10 bg-white/80 p-4">
+          <p className="text-[10px] font-bold text-ink/40 mb-2">业务输入</p>
+          <p className="text-sm text-ink/70">{nodeLabel(node.nodeKey)} 审核维度</p>
+          <p className="text-xs text-ink/50 mt-2">基于任务配置与上游检查结果</p>
+        </section>
 
-        <div className="space-y-5 p-5">
-          {tab === "conclusion" && (
+        <section className={`lg:col-span-1 rounded-xl border p-4 ${tone.bg} ${tone.border}`}>
+          <p className="text-[10px] font-bold text-ink/40 mb-2">审核结论</p>
+          <span className={`inline-block rounded-full border px-2.5 py-0.5 text-xs font-bold mb-2 ${tone.text} ${tone.border}`}>{verdict}</span>
+          <p className="text-sm font-bold text-primary">{String(userSummary.conclusion || node.summary)}</p>
+          {confidenceReason && <p className="text-xs text-warning mt-2">{confidenceReason}</p>}
+        </section>
+
+        <section className="lg:col-span-1 rounded-xl border border-primary/10 bg-white/80 p-4">
+          <p className="text-[10px] font-bold text-ink/40 mb-2">依据摘要</p>
+          <p className="text-sm text-ink/80">{String(userSummary.evidenceSummary || node.evidence)}</p>
+          {evidenceItems.length > 0 && (
             <>
-              <section className={`rounded-xl border p-4 ${tone.bg} ${tone.border}`}>
-                <p className="text-[10px] font-bold text-ink/40 mb-1">结论</p>
-                <div className="flex items-center gap-2 mb-2">
-                  <span className={`rounded-full border px-2 py-0.5 text-xs font-bold ${tone.text} ${tone.border}`}>{verdict}</span>
-                </div>
-                <p className="text-sm font-bold text-primary">{node.summary}</p>
-              </section>
-
-              <section className="rounded-xl border border-primary/10 bg-surface/30 p-4">
-                <p className="text-[10px] font-bold text-ink/40 mb-2">依据</p>
-                <p className="text-sm text-ink/80 mb-2">{node.evidence}</p>
-                {evidenceItems.length > 0 && (
-                  <>
-                    <ul className="space-y-1 text-xs text-ink/70">
-                      {evidencePaged.items.map((item, i) => {
-                        const row = item as Record<string, unknown>;
-                        return (
-                          <li key={i} className="rounded-lg bg-white/80 px-2 py-1.5">
-                            <span className="font-bold text-primary">{String(row.label ?? row.type)}</span>
-                            {row.value != null && <span> — {String(row.value)}</span>}
-                          </li>
-                        );
-                      })}
-                    </ul>
-                    <Pagination
-                      className="mt-3"
-                      page={evidencePaged.page}
-                      totalPages={evidencePaged.totalPages}
-                      onPageChange={setEvidencePage}
-                      label="依据条目"
-                    />
-                  </>
-                )}
-              </section>
-
-              <section className="rounded-xl border border-primary/10 bg-surface/30 p-4">
-                <p className="text-[10px] font-bold text-ink/40 mb-2">下一步</p>
-                <p className="text-sm text-ink/80">
-                  {String(action?.label || (node.status === "success" ? "继续发布流程" : "返回修复"))}
-                  {node.suggestion ? `：${node.suggestion}` : action?.reason ? `：${String(action.reason)}` : ""}
-                </p>
-                {node.impact && <p className="mt-2 text-xs text-warning">{node.impact}</p>}
-              </section>
+              <ul className="mt-3 space-y-1 text-xs text-ink/70">
+                {evidencePaged.items.map((item, i) => {
+                  const row = item as Record<string, unknown>;
+                  return (
+                    <li key={i} className="rounded-lg bg-surface/50 px-2 py-1.5">
+                      <span className="font-bold text-primary">{String(row.label ?? row.type)}</span>
+                      {row.value != null && <span> — {String(row.value)}</span>}
+                    </li>
+                  );
+                })}
+              </ul>
+              <Pagination className="mt-2" page={evidencePaged.page} totalPages={evidencePaged.totalPages} onPageChange={setEvidencePage} label="依据条目" />
             </>
           )}
+        </section>
 
-          {tab === "calls" && (
-            <CallReportPanel calls={calls} title="调用证据（输入 → 执行 → 输出）" paginate />
-          )}
-
-          {tab === "tech" && (
-            <details open className="text-xs">
-              <summary className="cursor-pointer font-bold text-ink/50 mb-2">原始节点 JSON</summary>
-              <pre className="text-[10px] bg-surface/50 rounded-lg p-3 overflow-x-auto whitespace-pre-wrap break-all">
-                {JSON.stringify(node.details, null, 2)}
-              </pre>
-              {traceId && (
-                <p className="font-mono break-all mt-3 text-ink/40">traceId: {traceId}</p>
+        <section className="lg:col-span-1 rounded-xl border border-primary/10 bg-white/80 p-4">
+          <p className="text-[10px] font-bold text-ink/40 mb-2">影响范围</p>
+          {impactLines.length === 0 ? (
+            <p className="text-sm text-ink/50">无额外影响</p>
+          ) : (
+            <>
+              <ul className="space-y-1 text-sm text-ink/80">
+                {impactPaged.items.map((line, i) => (
+                  <li key={i} className="rounded-lg bg-surface/40 px-2 py-1.5">{line}</li>
+                ))}
+              </ul>
+              {impactPaged.totalPages > 1 && (
+                <Pagination className="mt-2" page={impactPaged.page} totalPages={impactPaged.totalPages} onPageChange={setImpactPage} label="影响条目" />
               )}
-            </details>
+            </>
           )}
+        </section>
 
+        <section className="lg:col-span-1 rounded-xl border border-accent/20 bg-accent/5 p-4">
+          <p className="text-[10px] font-bold text-ink/40 mb-2">下一步</p>
+          <p className="text-sm font-bold text-primary">{nextStep}</p>
           {node.status !== "success" && node.fixStep && onJumpToStep && (
             <button
               onClick={() => onJumpToStep(node.fixStep)}
-              className="w-full rounded-xl bg-accent px-4 py-3 text-sm font-bold text-white hover:bg-accent/90"
+              className="mt-3 w-full rounded-xl bg-accent px-4 py-2.5 text-sm font-bold text-white hover:bg-accent/90"
             >
               前往修复：{FIX_STEP_LABELS[node.fixStep] || node.fixStep} →
             </button>
           )}
-        </div>
-      </aside>
-    </>
+        </section>
+      </div>
+    </div>
   );
 }
 
@@ -238,28 +214,28 @@ export function AuditBusinessDag({
   function NodeCard({ nodeKey, layoutItem }: { nodeKey: string; layoutItem: { x: number; y: number; width?: number; height?: number } }) {
     const node = nodeMap[nodeKey];
     if (!node) return null;
-    const verdict = businessVerdict(node);
+    const userSummary = (node.details?.userSummary || {}) as Record<string, unknown>;
+    const verdict = (String(userSummary.verdict || businessVerdict(node))) as BusinessVerdict;
     const tone = verdictTone(verdict);
-    const highlighted = !selectedNode || highlightKeys.has(nodeKey);
     const dimmed = selectedNode && !highlightKeys.has(nodeKey);
     const nw = layoutItem.width ?? DEFAULT_NODE_W;
 
     return (
       <button
         type="button"
-        onClick={() => setSelectedNode(node)}
+        onClick={() => setSelectedNode(selectedNode?.id === node.id ? null : node)}
         className={`absolute rounded-2xl border-2 p-4 text-left transition-all hover:shadow-lg ${
           selectedNode?.id === node.id ? "border-accent ring-2 ring-accent/25 scale-[1.02]" : "border-primary/10"
-        } ${tone.bg} ${dimmed ? "opacity-40" : ""} ${!highlighted ? "" : ""}`}
+        } ${tone.bg} ${dimmed ? "opacity-40" : ""}`}
         style={{ left: layoutItem.x, top: layoutItem.y, width: nw, minHeight: DEFAULT_NODE_H }}
       >
         <div className="flex items-start justify-between gap-2 mb-2">
-          <span className="text-[10px] font-bold text-ink/40">{STEP_LABELS[nodeKey]}</span>
+          <span className="text-[10px] font-bold text-ink/40">{nodeLabel(nodeKey)}</span>
           <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold shrink-0 ${tone.text} ${tone.border}`}>{verdict}</span>
         </div>
         <p className="text-sm font-bold text-primary leading-snug">{node.title}</p>
         <p className="text-xs text-ink/70 mt-2 line-clamp-2">{node.summary}</p>
-        <p className="text-[10px] text-ink/40 mt-2">{node.durationMs}ms · {agentLabel(String(node.details?.agent || nodeKey))}</p>
+        <p className="text-[10px] text-ink/40 mt-2">{node.durationMs}ms</p>
       </button>
     );
   }
@@ -269,7 +245,7 @@ export function AuditBusinessDag({
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h3 className="text-lg font-bold text-primary">AI 质量审核</h3>
-          <p className="text-xs text-ink/50">产品化流程图 — 点击节点查看结论、依据与下一步</p>
+          <p className="text-xs text-ink/50">使用者视角 — 点击节点查看结论、影响与下一步</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {hashMismatch && (
@@ -280,7 +256,7 @@ export function AuditBusinessDag({
           )}
           {traceId && (
             <a href={`/?view=trace&traceId=${encodeURIComponent(traceId)}`} className="rounded-xl border border-primary/15 px-3 py-2 text-xs font-bold text-primary hover:bg-surface/50">
-              打开 Trace 排障台
+              查看开发者 Trace
             </a>
           )}
           <button onClick={onForceRerun} disabled={loading} className={`rounded-xl px-4 py-2 text-sm font-bold transition ${loading ? "bg-accent/50 text-white cursor-wait" : "border border-accent/30 text-accent hover:bg-accent/5"}`}>
@@ -315,7 +291,7 @@ export function AuditBusinessDag({
           </div>
 
           {!selectedNode && (
-            <p className="text-xs text-ink/40 text-center">点击任意节点查看为什么通过 / 为什么低置信</p>
+            <p className="text-xs text-ink/40 text-center">点击任意节点查看业务结论画布</p>
           )}
 
           <div className="w-full overflow-x-auto pb-2">
@@ -325,11 +301,11 @@ export function AuditBusinessDag({
               ))}
             </DagCanvas>
           </div>
-        </div>
-      )}
 
-      {selectedNode && (
-        <NodeDrawer node={selectedNode} traceId={traceId} onClose={() => setSelectedNode(null)} onJumpToStep={onJumpToStep} />
+          {selectedNode && (
+            <UserBusinessConclusionCanvas node={selectedNode} traceId={traceId} onJumpToStep={onJumpToStep} />
+          )}
+        </div>
       )}
     </div>
   );

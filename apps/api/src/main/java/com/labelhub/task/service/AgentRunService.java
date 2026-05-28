@@ -29,7 +29,7 @@ public class AgentRunService {
         "publish_readiness", "task_package_writer"
     );
 
-    private static final int DETAILS_VERSION = 3;
+    private static final int DETAILS_VERSION = 4;
 
     private final JdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
@@ -199,6 +199,7 @@ public class AgentRunService {
             List<Map<String, Object>> actual,
             List<Map<String, Object>> evidenceItems,
             Map<String, Object> calls,
+            Map<String, Object> userSummary,
             String riskLevel, String riskReason,
             String actionLabel, String actionStep, String actionReason,
             String ragStatus, int skillCount, int toolCallCount, int mcpCount) {
@@ -213,6 +214,7 @@ public class AgentRunService {
         enriched.put("actual", actual);
         enriched.put("evidenceItems", evidenceItems);
         enriched.put("calls", calls != null ? calls : Map.of());
+        enriched.put("userSummary", userSummary != null ? userSummary : Map.of());
         enriched.put("risk", Map.of("level", riskLevel, "reason", riskReason != null ? riskReason : ""));
         enriched.put("action", Map.of("label", actionLabel, "step", actionStep, "reason", actionReason != null ? actionReason : ""));
         enriched.put("ragStatus", ragStatus);
@@ -220,6 +222,149 @@ public class AgentRunService {
         enriched.put("toolCallCount", toolCallCount);
         enriched.put("mcpCount", mcpCount);
         return enriched;
+    }
+
+    private Map<String, Object> buildUserSummary(String nodeStatus, String summary, String evidence,
+                                                   String impact, String suggestion, String ragStatus) {
+        String verdict = "success".equals(nodeStatus)
+            ? ("empty".equals(ragStatus) ? "低置信" : "可发布")
+            : "需修复";
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("verdict", verdict);
+        m.put("conclusion", summary);
+        m.put("evidenceSummary", evidence != null ? evidence : "");
+        m.put("businessImpact", impact != null ? impact : "");
+        m.put("nextStep", suggestion != null && !suggestion.isBlank()
+            ? suggestion
+            : ("success".equals(nodeStatus) ? "继续发布流程" : "返回对应步骤修复"));
+        m.put("confidenceReason", "empty".equals(ragStatus) ? "知识库空召回，结论偏静态规则" : "");
+        return m;
+    }
+
+    private Map<String, Object> buildPromptPreview(AuditRequest request, String agent, String businessNodeKey, String objective) {
+        Map<String, Object> p = new LinkedHashMap<>();
+        p.put("agent", agent);
+        p.put("businessNode", businessNodeKey);
+        p.put("objective", objective);
+        p.put("systemContext", "LabelHub AI 质量审核 · 输出可执行业务结论");
+        Map<String, Object> userInput = new LinkedHashMap<>();
+        userInput.put("taskName", request.taskName());
+        userInput.put("instructionPreview", truncate(request.instruction(), 200));
+        p.put("userInput", userInput);
+        p.put("constraints", List.of("优先参考知识库", "失败时给出修复建议", "不暴露技术实现细节给使用者"));
+        return p;
+    }
+
+    private List<Map<String, Object>> buildDecisionSteps(String businessNodeKey, List<Map<String, Object>> spans,
+                                                          String status, String summary, String ragStatus) {
+        List<Map<String, Object>> steps = new ArrayList<>();
+        steps.add(Map.of(
+            "id", businessNodeKey + "_dec_1",
+            "title", "读取上游输入",
+            "why", "汇总任务配置与上游检查结果，确定本节点审核目标",
+            "inputRefs", List.of(businessNodeKey),
+            "selectedCalls", List.of(),
+            "result", "输入上下文就绪",
+            "nextAction", spans.isEmpty() ? "使用静态规则评估" : "按策略触发外部调用"
+        ));
+        int round = 2;
+        for (Map<String, Object> span : spans) {
+            String spanId = String.valueOf(span.getOrDefault("id", "span_" + round));
+            steps.add(Map.of(
+                "id", businessNodeKey + "_dec_" + round,
+                "title", "决策轮次 " + (round - 1) + " · " + span.getOrDefault("title", "调用"),
+                "why", span.getOrDefault("whyCalled", "执行自动检查"),
+                "inputRefs", List.of(spanId),
+                "selectedCalls", List.of(spanId),
+                "result", span.getOrDefault("resultSummary", ""),
+                "nextAction", round < spans.size() + 1 ? "继续下一项检查" : "汇总 Agent 输出"
+            ));
+            round++;
+        }
+        steps.add(Map.of(
+            "id", businessNodeKey + "_dec_final",
+            "title", "汇总输出结论",
+            "why", "综合各轮调用结果形成业务结论",
+            "inputRefs", spans.stream().map(s -> String.valueOf(s.getOrDefault("id", ""))).toList(),
+            "selectedCalls", List.of(),
+            "result", summary,
+            "nextAction", "success".equals(status) ? "传递到下游节点" : "提示用户修复"
+        ));
+        if ("empty".equals(ragStatus)) {
+            steps.get(0);
+            Map<String, Object> first = new LinkedHashMap<>(steps.get(0));
+            first.put("result", first.get("result") + "（知识库空召回，将降级为静态规则）");
+            steps.set(0, first);
+        }
+        return steps;
+    }
+
+    private Map<String, Object> buildInternalGraph(String businessNodeKey, Map<String, Object> promptPreview,
+                                                   List<Map<String, Object>> spans, List<Map<String, Object>> decisionSteps,
+                                                   String summary, String status) {
+        List<Map<String, Object>> nodes = new ArrayList<>();
+        List<Map<String, Object>> edges = new ArrayList<>();
+        nodes.add(graphNode("prompt", "prompt", "Prompt 输入", promptPreview, null));
+        nodes.add(graphNode("decision_main", "decision", "决策轮次", Map.of("stepCount", decisionSteps.size()), null));
+        int y = 0;
+        for (Map<String, Object> span : spans) {
+            String id = String.valueOf(span.getOrDefault("id", "call_" + y));
+            String kind = String.valueOf(span.getOrDefault("kind", "tool"));
+            nodes.add(graphNode(id, kind, String.valueOf(span.getOrDefault("title", kind)), span.get("inputPreview"), span.get("outputPreview")));
+            edges.add(graphEdge("decision_main", id));
+            y++;
+        }
+        if (spans.isEmpty()) {
+            nodes.add(graphNode("static_rule", "decision", "静态规则评估", Map.of("reason", "无外部调用，使用内置规则"), Map.of("status", status)));
+            edges.add(graphEdge("decision_main", "static_rule"));
+            edges.add(graphEdge("static_rule", "output"));
+        } else {
+            for (Map<String, Object> span : spans) {
+                edges.add(graphEdge(String.valueOf(span.getOrDefault("id", "")), "output"));
+            }
+        }
+        nodes.add(graphNode("output", "output", "Agent 输出", Map.of("conclusion", summary), Map.of("status", status)));
+        edges.add(0, graphEdge("prompt", "decision_main"));
+        Map<String, Object> graph = new LinkedHashMap<>();
+        graph.put("nodes", nodes);
+        graph.put("edges", edges);
+        graph.put("businessNode", businessNodeKey);
+        return graph;
+    }
+
+    private Map<String, Object> graphNode(String id, String type, String title, Object inputPreview, Object outputPreview) {
+        Map<String, Object> n = new LinkedHashMap<>();
+        n.put("id", id);
+        n.put("type", type);
+        n.put("title", title);
+        if (inputPreview != null) n.put("inputPreview", inputPreview);
+        if (outputPreview != null) n.put("outputPreview", outputPreview);
+        return n;
+    }
+
+    private Map<String, Object> graphEdge(String from, String to) {
+        return Map.of("from", from, "to", to);
+    }
+
+    private Map<String, Object> buildBusinessMapping(String businessNodeKey) {
+        List<String> upstream = switch (businessNodeKey) {
+            case "sample_data", "annotation_template", "quality_rules" -> List.of("task_description");
+            case "comprehensive_assessment" -> List.of("task_description", "sample_data", "annotation_template", "quality_rules");
+            case "publish_readiness" -> List.of("comprehensive_assessment");
+            default -> List.of();
+        };
+        List<String> downstream = switch (businessNodeKey) {
+            case "task_description" -> List.of("sample_data", "annotation_template", "quality_rules");
+            case "sample_data", "annotation_template", "quality_rules" -> List.of("comprehensive_assessment");
+            case "comprehensive_assessment" -> List.of("publish_readiness");
+            default -> List.of();
+        };
+        return Map.of(
+            "businessNode", businessNodeKey,
+            "agent", NODE_AGENT_MAP.getOrDefault(businessNodeKey, businessNodeKey),
+            "upstream", upstream,
+            "downstream", downstream
+        );
     }
 
     private List<Map<String, Object>> sampleFieldNames(List<Map<String, Object>> sampleData, int limit) {
@@ -564,6 +709,12 @@ public class AgentRunService {
         }
         Map<String, Object> calls = buildCallsEnvelope(ragInfo, skillInfo, tools, sandboxCalls, mcpCalls, spans);
         Map<String, Object> inputPreview = buildAgentInputPreview(request, nodeKey);
+        String ragStatus = ragInfo != null && Boolean.TRUE.equals(ragInfo.get("hasContent")) ? "hit" : "empty";
+        Map<String, Object> promptPreview = buildPromptPreview(request, agent, nodeKey, summary);
+        List<Map<String, Object>> decisionSteps = buildDecisionSteps(nodeKey, spans, status, summary, ragStatus);
+        Map<String, Object> internalGraph = buildInternalGraph(nodeKey, promptPreview, spans, decisionSteps, summary, status);
+        Map<String, Object> businessMapping = buildBusinessMapping(nodeKey);
+
         Map<String, Object> outputPreview = buildAgentOutputPreview(nodeKey, status, summary, spans);
         outputPreview.put("agent", agent);
         outputPreview.put("nodeKey", nodeKey);
@@ -571,6 +722,10 @@ public class AgentRunService {
         outputPreview.put("phase", "execute");
         outputPreview.put("callKind", "agent_execution");
         outputPreview.put("calls", calls);
+        outputPreview.put("promptPreview", promptPreview);
+        outputPreview.put("decisionSteps", decisionSteps);
+        outputPreview.put("internalGraph", internalGraph);
+        outputPreview.put("businessMapping", businessMapping);
 
         Map<String, Object> mcpInfo = mcpCalls != null && !mcpCalls.isEmpty() ? Map.of("probes", mcpCalls) : null;
         Map<String, Object> primarySandbox = sandboxCalls.isEmpty() ? (tools.isEmpty() ? null : tools.get(0)) : sandboxCalls.get(0);
@@ -662,6 +817,7 @@ public class AgentRunService {
             ),
             instrEvidenceItems,
             calls1,
+            buildUserSummary(instrStatus, instrSummary, instrEvidence, instrImpact, instrSuggestion, ragStatus1),
             instrStatus.equals("warning") ? "high" : "low",
             instrImpact,
             instrFindings.isEmpty() ? "继续观察" : "优化说明",
@@ -722,6 +878,7 @@ public class AgentRunService {
             ),
             dataEvidenceItems,
             calls2,
+            buildUserSummary(dataStatus, dataSummary, ragContext2.isEmpty() ? "通过配置校验器直接检查" : "参考数据规范", dataStatus.equals("warning") ? "样例不足会导致后续无法为 AI/标注员提供有效的 Few-Shot 提示，影响启动准确率" : "", dataResult.findings().isEmpty() ? "" : "请返回 [数据上传] 步骤补充更多样例，或修复字段为空的数据", ragStatus2),
             dataStatus.equals("warning") ? "high" : "low",
             dataStatus.equals("warning") ? "样例不足会导致后续无法为 AI/标注员提供有效的 Few-Shot 提示，影响启动准确率" : "",
             dataResult.findings().isEmpty() ? "无需动作" : "补充样例",
@@ -791,6 +948,7 @@ public class AgentRunService {
             ),
             schemaEvidenceItems,
             calls3,
+            buildUserSummary(schemaStatus, schemaSummary, ragContext3.isEmpty() ? "基于通用组件规范" : "参考模板规范", schemaStatus.equals("warning") ? "模板残缺或字段未映射会导致标注页无法正确渲染表单，前端无法收集结果" : "", schemaFindings.isEmpty() ? "" : schemaFindings.get(0).suggestion(), ragStatus3),
             schemaStatus.equals("warning") ? "high" : "low",
             schemaStatus.equals("warning") ? "模板残缺或字段未映射会导致标注页无法正确渲染表单，前端无法收集结果" : "",
             schemaFindings.isEmpty() ? "无需动作" : "修复模板",
@@ -852,6 +1010,7 @@ public class AgentRunService {
             ),
             rubricEvidenceItems,
             calls4,
+            buildUserSummary(rubricStatus, rubricSummary, ragContext4.isEmpty() ? "通用规则检查" : "参考质检规范", rubricStatus.equals("warning") ? "缺乏量化的规则会导致机器和人工质检都失去标准，模型预标注的质量无法评估" : "", rubricResult.findings().isEmpty() ? "" : "返回 [质检规则] 步骤补充维度和规则描述", ragStatus4),
             rubricStatus.equals("warning") ? "high" : "low",
             rubricStatus.equals("warning") ? "缺乏量化的规则会导致机器和人工质检都失去标准，模型预标注的质量无法评估" : "",
             rubricResult.findings().isEmpty() ? "无需动作" : "补充规则",
@@ -903,6 +1062,7 @@ public class AgentRunService {
             depMatrix,
             issues.stream().map(i -> Map.<String, Object>of("type", "dependency_gap", "label", "未满足", "value", i, "source", "upstream")).toList(),
             calls5,
+            buildUserSummary(assessStatus, assessSummary, ragContext5.isEmpty() ? "静态聚合" : "参考评分标准", hasAll ? "" : "不完整的配置可能影响标注质量和效率", issues.isEmpty() ? "" : "修复: " + String.join("、", issues), ragStatus5),
             hasAll ? "low" : "high",
             hasAll ? "" : "强行发布将会进入残缺状态，B/C端不可见",
             hasAll ? "进入发布准备" : "修复上游",
@@ -967,6 +1127,7 @@ public class AgentRunService {
                 mcpProbeResults.stream().map(m -> Map.<String, Object>of("type", "mcp_probe", "label", m.get("server"), "value", m.get("status"), "source", "mcp"))
             ).toList(),
             calls6,
+            buildUserSummary(pkgStatus, pkgSummary, "下游 API 契约协议", pkgStatus.equals("warning") ? "不完整的任务包无法被 B/C 模块正确消费" : "", pkgResult.findings().isEmpty() ? "" : pkgResult.findings().get(0), "n/a"),
             pkgStatus.equals("warning") ? "high" : "low",
             pkgStatus.equals("warning") ? "下游 B/C 端解析报错，导致任务不可见" : "",
             pkgStatus.equals("warning") ? "重试或反馈" : "完成",

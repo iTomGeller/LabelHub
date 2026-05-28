@@ -56,5 +56,8 @@ export function statusLabelZh(status: string) {
   }
 }
 
+export const GRAFANA_AGENT_ZH = AGENT_ZH;
+export const GRAFANA_NODE_ZH = NODE_ZH;
+
 export const GRAFANA_AGENT_DASHBOARD_URL =
   "/grafana/d/labelhub-agent-rag-trace/labelhub-agent-diagnostic?orgId=1&from=now-6h&to=now&var-agent=$__all&var-node=$__all";

@@ -4,7 +4,6 @@ import json
 import re
 import sys
 import urllib.request
-from urllib.parse import quote
 
 if hasattr(sys.stdout, "buffer"):
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
@@ -14,6 +13,8 @@ TASK_ID = "task_text_cls_001"
 STALE_GRAFANA_MARKERS = [
     "LabelHub Agent 级监控",
     "RAG 命中率 (全 Agent)",
+    '"label": "Agent"',
+    '"agent": "Agent"',
 ]
 GRAFANA_UID = "labelhub-agent-rag-trace"
 GRAFANA_SLUG_PATH = f"/grafana/d/{GRAFANA_UID}/labelhub-agent-diagnostic"
@@ -23,6 +24,11 @@ REQUIRED_SPAN_FIELDS = [
     "id", "kind", "title", "whyCalled", "inputPreview", "outputPreview",
     "resultSummary", "durationMs", "status", "degradeReason",
 ]
+REQUIRED_AGENT_OUTPUT_FIELDS = [
+    "promptPreview", "decisionSteps", "internalGraph", "businessMapping",
+]
+USER_VIEW_FORBIDDEN = ["Prompt 输入", "knowledge_base", "exitCode", "task_context_builder"]
+DEV_VIEW_MARKERS = ["Agent 执行画布", "Prompt 输入", "决策轮次", "调用证据", "Agent 输出"]
 
 
 def fetch(path, method="GET", body=None, timeout=120):
@@ -59,6 +65,26 @@ def assert_span_contract(span, node_key):
         raise AssertionError(f"mcp span missing server input on {node_key}")
 
 
+def assert_agent_execution_contract(out, node_id):
+    missing = [f for f in REQUIRED_AGENT_OUTPUT_FIELDS if f not in out]
+    if missing:
+        raise AssertionError(f"agent node {node_id} outputPreview missing: {missing}")
+    steps = out.get("decisionSteps") or []
+    if not steps:
+        raise AssertionError(f"agent node {node_id} decisionSteps empty")
+    graph = out.get("internalGraph") or {}
+    nodes = graph.get("nodes") or []
+    edges = graph.get("edges") or []
+    if len(nodes) < 3:
+        raise AssertionError(f"agent node {node_id} internalGraph.nodes too few: {len(nodes)}")
+    if not edges:
+        raise AssertionError(f"agent node {node_id} internalGraph.edges empty")
+    types = {n.get("type") for n in nodes}
+    for required in ("prompt", "decision", "output"):
+        if required not in types:
+            raise AssertionError(f"agent node {node_id} missing internal node type {required}")
+
+
 def check_grafana_api():
     status, content = fetch(f"/grafana/api/dashboards/uid/{GRAFANA_UID}")
     if status != 200:
@@ -71,7 +97,11 @@ def check_grafana_api():
     text = json.dumps(dash, ensure_ascii=False)
     for bad in STALE_GRAFANA_MARKERS:
         if bad in text:
-            raise AssertionError(f"stale panel {bad!r}")
+            raise AssertionError(f"stale marker {bad!r}")
+    if '"label": "智能体"' not in text:
+        raise AssertionError('missing variable label 智能体')
+    if "全部智能体" not in text:
+        raise AssertionError('missing 全部智能体 default text')
     return f"title={title}"
 
 
@@ -129,7 +159,12 @@ def check_task_text_cls_audit():
     blob = json.dumps(nodes, ensure_ascii=False)
     for node in nodes:
         node_key = node.get("nodeKey")
-        calls = ((node.get("details") or {}).get("calls") or {})
+        details = node.get("details") or {}
+        user_summary = details.get("userSummary") or {}
+        for field in ("verdict", "conclusion", "nextStep"):
+            if field not in user_summary:
+                raise AssertionError(f"node {node_key} userSummary missing {field}")
+        calls = details.get("calls") or {}
         rag = calls.get("rag") or {}
         if rag.get("hasContent"):
             rag_hits += 1
@@ -140,13 +175,19 @@ def check_task_text_cls_audit():
             assert_span_contract(span, node_key)
             span_total += 1
 
+    agent_exec = 0
     for tn in dev_nodes:
         if tn.get("type") != "agent_execution":
             continue
+        agent_exec += 1
         inp = tn.get("inputPreview")
         out = tn.get("outputPreview")
         if not inp or not out:
             raise AssertionError(f"trace node {tn.get('id')} missing input/output preview")
+        assert_agent_execution_contract(out, tn.get("id"))
+
+    if agent_exec < 6:
+        raise AssertionError(f"expected 6 agent_execution nodes, got {agent_exec}")
 
     if rag_hits < 3:
         raise AssertionError(f"expected >=3 RAG hits, got {rag_hits}")
@@ -165,6 +206,12 @@ def check_web_publish_task_text_cls():
         raise AssertionError("publish page stuck at start audit only")
     if "AI 质量审核" not in html:
         raise AssertionError("missing publish audit section")
+    for marker in ("业务结论", "依据摘要", "影响范围", "下一步", "使用者视角"):
+        if marker not in html:
+            raise AssertionError(f"publish page missing user marker {marker!r}")
+    for forbidden in USER_VIEW_FORBIDDEN:
+        if forbidden in html:
+            raise AssertionError(f"user view exposes forbidden {forbidden!r}")
     if "knowledge_base" in html.lower():
         raise AssertionError("default UI exposes knowledge_base")
     if "exitCode" in html:
@@ -179,10 +226,11 @@ def check_trace_page():
         raise AssertionError(f"trace page HTTP {status}")
     if "Trace" not in html:
         raise AssertionError("missing trace view")
-    if "上一页" not in html and "最近 Trace" not in html:
-        # pagination may not show if <=4 runs; still require workbench copy
-        if "Trace 排障工作台" not in html and "Agent Trace" not in html:
-            raise AssertionError("missing trace workbench markers")
+    if "Trace 排障工作台" not in html and "开发者视角" not in html:
+        raise AssertionError("missing trace workbench markers")
+    for marker in DEV_VIEW_MARKERS[:3]:
+        if marker not in html:
+            raise AssertionError(f"trace page missing dev marker {marker!r}")
     return "trace page ok"
 
 
@@ -203,22 +251,29 @@ def check_trace_detail_api():
         raise AssertionError("developerDag empty")
     io_ok = 0
     span_io = 0
+    graph_ok = 0
     for tn in dev:
         if tn.get("type") != "agent_execution":
             continue
-        if tn.get("inputPreview") and tn.get("outputPreview"):
+        out = tn.get("outputPreview") or {}
+        if tn.get("inputPreview") and out:
             io_ok += 1
-        calls = ((tn.get("outputPreview") or {}).get("calls") or {})
+        try:
+            assert_agent_execution_contract(out, tn.get("id"))
+            graph_ok += 1
+        except AssertionError:
+            pass
+        calls = out.get("calls") or {}
         for span in calls.get("spans") or []:
             if span.get("inputPreview") and span.get("outputPreview"):
                 span_io += 1
-            if span.get("whyCalled"):
-                pass
     if io_ok < 6:
         raise AssertionError(f"expected 6 agent input/output previews, got {io_ok}")
+    if graph_ok < 6:
+        raise AssertionError(f"expected 6 agent internalGraph contracts, got {graph_ok}")
     if span_io < 10:
         raise AssertionError(f"expected >=10 span io previews, got {span_io}")
-    return f"traceId={trace_id}, agentIo={io_ok}, spanIo={span_io}"
+    return f"traceId={trace_id}, agentIo={io_ok}, graphOk={graph_ok}, spanIo={span_io}"
 
 
 def main():
@@ -235,10 +290,10 @@ def main():
 
     run("grafana api diagnostic", check_grafana_api)
     run("knowledge seeded", check_knowledge_seeded)
-    run("task_text_cls_001 audit semantic + spans", check_task_text_cls_audit)
-    run("web publish task_text_cls_001", check_web_publish_task_text_cls)
-    run("trace page", check_trace_page)
-    run("trace detail io api", check_trace_detail_api)
+    run("task_text_cls_001 audit semantic + spans + graph", check_task_text_cls_audit)
+    run("web publish task_text_cls_001 user view", check_web_publish_task_text_cls)
+    run("trace page dev view", check_trace_page)
+    run("trace detail io + internalGraph api", check_trace_detail_api)
 
     print(f"\n产品验收: {sum(checks)}/{len(checks)} 通过")
     sys.exit(0 if all(checks) else 1)

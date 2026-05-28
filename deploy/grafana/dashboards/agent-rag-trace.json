@@ -49,10 +49,46 @@
       "targets": [{ "expr": "sum(agent_mcp_call_total{agent=~\"$agent\", node=~\"$node\", status=\"unavailable\"}) or vector(0)", "legendFormat": "不可用" }]
     },
     {
-      "title": "Agent/Node 根因表",
+      "title": "智能体/节点 根因表",
       "type": "table",
       "gridPos": { "h": 11, "w": 24, "x": 0, "y": 4 },
-      "fieldConfig": { "defaults": { "custom": { "align": "auto" } }, "overrides": [] },
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "auto" } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "智能体" },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  { "type": "value", "options": { "task_context_builder": { "text": "任务说明构建", "index": 0 } } },
+                  { "type": "value", "options": { "dataset_sampler": { "text": "样例采样", "index": 1 } } },
+                  { "type": "value", "options": { "schema_generator": { "text": "模板生成", "index": 2 } } },
+                  { "type": "value", "options": { "rubric_generator": { "text": "规则生成", "index": 3 } } },
+                  { "type": "value", "options": { "critic": { "text": "综合评估", "index": 4 } } },
+                  { "type": "value", "options": { "task_package_writer": { "text": "发布打包", "index": 5 } } }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "业务节点" },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  { "type": "value", "options": { "task_description": { "text": "任务说明", "index": 0 } } },
+                  { "type": "value", "options": { "sample_data": { "text": "样例数据", "index": 1 } } },
+                  { "type": "value", "options": { "annotation_template": { "text": "标注模板", "index": 2 } } },
+                  { "type": "value", "options": { "quality_rules": { "text": "质检规则", "index": 3 } } },
+                  { "type": "value", "options": { "comprehensive_assessment": { "text": "综合评估", "index": 4 } } },
+                  { "type": "value", "options": { "publish_readiness": { "text": "发布准备", "index": 5 } } }
+                ]
+              }
+            ]
+          }
+        ]
+      },
       "transformations": [
         { "id": "merge", "options": {} },
         {
@@ -60,8 +96,8 @@
           "options": {
             "excludeByName": { "Time": true },
             "renameByName": {
-              "agent": "Agent",
-              "node": "节点",
+              "agent": "智能体",
+              "node": "业务节点",
               "Value #rag_empty": "空召回",
               "Value #tool_err": "工具异常",
               "Value #mcp_bad": "MCP不可用",
@@ -92,7 +128,7 @@
         "overrides": []
       },
       "options": { "orientation": "horizontal", "displayMode": "gradient" },
-      "targets": [{ "expr": "sum by (agent, node) (agent_rag_run_empty_total{agent=~\"$agent\", node=~\"$node\"}) or vector(0)", "legendFormat": "{{agent}} / {{node}}" }]
+      "targets": [{ "expr": "sum by (agent, node) (agent_rag_run_empty_total{agent=~\"$agent\", node=~\"$node\"}) or vector(0)", "legendFormat": "空召回 · {{node}}" }]
     },
     {
       "title": "工具调用状态",
@@ -100,7 +136,7 @@
       "gridPos": { "h": 8, "w": 8, "x": 8, "y": 15 },
       "fieldConfig": { "defaults": { "noValue": "暂无调用" }, "overrides": [] },
       "options": { "orientation": "horizontal", "displayMode": "gradient" },
-      "targets": [{ "expr": "sum by (agent, node, status) (agent_tool_call_total{agent=~\"$agent\", node=~\"$node\"}) or vector(0)", "legendFormat": "{{agent}} / {{node}} / {{status}}" }]
+      "targets": [{ "expr": "sum by (agent, node, status) (agent_tool_call_total{agent=~\"$agent\", node=~\"$node\"}) or vector(0)", "legendFormat": "工具 · {{node}} · {{status}}" }]
     },
     {
       "title": "MCP 探测",
@@ -108,7 +144,7 @@
       "gridPos": { "h": 8, "w": 8, "x": 16, "y": 15 },
       "fieldConfig": { "defaults": { "noValue": "未配置 MCP" }, "overrides": [] },
       "options": { "orientation": "horizontal", "displayMode": "gradient" },
-      "targets": [{ "expr": "sum by (agent, server, status) (agent_mcp_call_total{agent=~\"$agent\", node=~\"$node\"}) or vector(0)", "legendFormat": "{{agent}} / {{server}} / {{status}}" }]
+      "targets": [{ "expr": "sum by (agent, server, status) (agent_mcp_call_total{agent=~\"$agent\", node=~\"$node\"}) or vector(0)", "legendFormat": "MCP · {{server}} · {{status}}" }]
     },
     {
       "title": "技能发现趋势",
@@ -116,7 +152,7 @@
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 23 },
       "fieldConfig": { "defaults": { "noValue": "暂无" }, "overrides": [] },
       "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull"] } },
-      "targets": [{ "expr": "sum by (agent, node) (increase(agent_skill_finding_total{agent=~\"$agent\", node=~\"$node\"}[5m])) or vector(0)", "legendFormat": "{{agent}} / {{node}}" }]
+      "targets": [{ "expr": "sum by (agent, node) (increase(agent_skill_finding_total{agent=~\"$agent\", node=~\"$node\"}[5m])) or vector(0)", "legendFormat": "技能 · {{node}}" }]
     },
     {
       "title": "节点 P95 耗时",
@@ -124,7 +160,7 @@
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 23 },
       "fieldConfig": { "defaults": { "noValue": "暂无", "unit": "s" }, "overrides": [] },
       "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull"] } },
-      "targets": [{ "expr": "histogram_quantile(0.95, sum by (le, agent, node) (rate(audit_node_duration_seconds_bucket{agent=~\"$agent\", node=~\"$node\"}[5m])))", "legendFormat": "{{agent}} / {{node}}" }]
+      "targets": [{ "expr": "histogram_quantile(0.95, sum by (le, agent, node) (rate(audit_node_duration_seconds_bucket{agent=~\"$agent\", node=~\"$node\"}[5m])))", "legendFormat": "P95 · {{node}}" }]
     }
   ],
   "schemaVersion": 38,
@@ -134,29 +170,29 @@
       {
         "name": "agent",
         "type": "query",
-        "label": "Agent",
+        "label": "智能体",
         "datasource": { "type": "prometheus", "uid": "prometheus" },
         "query": { "query": "label_values(agent_trace_node_total, agent)", "refId": "PrometheusVariableQueryEditor-VariableQuery" },
         "includeAll": true,
         "multi": false,
         "allValue": ".*",
-        "current": { "selected": true, "text": "All", "value": "$__all" }
+        "current": { "selected": true, "text": "全部智能体", "value": "$__all" }
       },
       {
         "name": "node",
         "type": "query",
-        "label": "节点",
+        "label": "业务节点",
         "datasource": { "type": "prometheus", "uid": "prometheus" },
         "query": { "query": "label_values(agent_trace_node_total{agent=~\"$agent\"}, node)", "refId": "PrometheusVariableQueryEditor-VariableQuery" },
         "includeAll": true,
         "multi": false,
         "allValue": ".*",
-        "current": { "selected": true, "text": "All", "value": "$__all" }
+        "current": { "selected": true, "text": "全部节点", "value": "$__all" }
       }
     ]
   },
   "time": { "from": "now-6h", "to": "now" },
   "title": "LabelHub Agent 诊断台",
   "uid": "labelhub-agent-rag-trace",
-  "version": 3
+  "version": 4
 }

@@ -8,7 +8,7 @@ import {
   type TraceNode,
 } from "@/lib/traceExecution";
 import { DagCanvas, useNarrowScreen } from "./DagCanvas";
-import { PagedRawJson, TraceCallGraph, TraceSpanTimeline } from "./TraceSpanTimeline";
+import { AgentWorkflowCanvas } from "./AgentWorkflowCanvas";
 import {
   BUSINESS_DAG_EDGES,
   BUSINESS_DAG_LANE_LABELS,
@@ -18,7 +18,7 @@ import {
   DEFAULT_NODE_W,
   LANE_GUTTER_W,
 } from "@/lib/dagLayout";
-import { agentLabel, statusLabelZh } from "@/lib/diagnosticLabels";
+import { agentLabel, nodeLabel, statusLabelZh } from "@/lib/diagnosticLabels";
 import { flattenCalls } from "@/lib/callReport";
 
 interface Props {
@@ -47,8 +47,6 @@ const DAG_ORDER = [
   "publish_readiness",
 ];
 
-type PanelTab = "io" | "chain" | "waterfall" | "raw";
-
 function statusBadge(status: string) {
   if (status === "success") return "bg-success/10 text-success border-success/20";
   if (status === "warning") return "bg-warning/10 text-warning border-warning/20";
@@ -66,8 +64,6 @@ function emptyStateMessage(runStatus?: string, traceCompleteness?: boolean, grou
 export function AgentTraceDag({ nodes, traceId, runStatus, traceCompleteness, compact }: Props) {
   const [expandedGroup, setExpandedGroup] = useState<string | null>(null);
   const [filter, setFilter] = useState<string>("all");
-  const [panelTab, setPanelTab] = useState<PanelTab>("io");
-  const [spanPage, setSpanPage] = useState(1);
   const narrow = useNarrowScreen();
 
   const groups = groupTraceNodes(nodes);
@@ -96,26 +92,23 @@ export function AgentTraceDag({ nodes, traceId, runStatus, traceCompleteness, co
     return (
       <button
         type="button"
-        onClick={() => {
-          setExpandedGroup(expandedGroup === group.traceNodeId ? null : group.traceNodeId);
-          setPanelTab("io");
-          setSpanPage(1);
-        }}
+        onClick={() => setExpandedGroup(expandedGroup === group.traceNodeId ? null : group.traceNodeId)}
         className={`absolute rounded-2xl border bg-white p-4 text-left transition hover:shadow-lg ${
           expandedGroup === group.traceNodeId ? "border-accent ring-2 ring-accent/20" : "border-primary/10"
         }`}
         style={{ left: layoutItem.x, top: layoutItem.y, width: nw, minHeight: DEFAULT_NODE_H }}
+        title={group.agent}
       >
         <div className="flex items-start gap-2">
           <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-accent/10 text-[10px] font-bold text-accent">{group.sequence}</span>
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-1 mb-1">
-              <span className="text-sm font-bold text-primary">{group.title}</span>
+              <span className="text-sm font-bold text-primary">{agentLabel(group.agent)}</span>
               <span className={`rounded border px-1.5 py-0.5 text-[9px] font-bold ${statusBadge(group.status)}`}>{statusLabelZh(group.status)}</span>
             </div>
-            <p className="text-[10px] text-ink/50">{agentLabel(group.agent)} · {group.durationMs}ms · {spanCount} 个 span</p>
+            <p className="text-[10px] text-ink/50">负责 {nodeLabel(group.nodeKey)} · {group.durationMs}ms · {spanCount} 次调用</p>
             {rag && rag.hasContent === false && (
-              <p className="text-[10px] text-warning mt-1">{String(rag.emptyReason || "RAG 空召回")}</p>
+              <p className="text-[10px] text-warning mt-1">{String(rag.emptyReason || "知识库空召回")}</p>
             )}
           </div>
         </div>
@@ -128,7 +121,7 @@ export function AgentTraceDag({ nodes, traceId, runStatus, traceCompleteness, co
       {!compact && (
         <div>
           <h3 className="text-lg font-bold text-primary">Trace 排障工作台</h3>
-          <p className="text-xs text-ink/50">主链路 6 Agent · 选中后查看输入输出、调用链与耗时瀑布</p>
+          <p className="text-xs text-ink/50">开发者视角 — Agent 原子 DAG · 选中后展开执行画布</p>
         </div>
       )}
 
@@ -155,7 +148,7 @@ export function AgentTraceDag({ nodes, traceId, runStatus, traceCompleteness, co
           <p className="text-xs text-ink/40">{emptyMsg.detail}</p>
         </div>
       ) : (
-        <div className={`grid gap-4 ${expanded && !narrow ? "lg:grid-cols-[1fr_420px]" : ""}`}>
+        <div className="space-y-5">
           <div className="overflow-x-auto pb-2 min-w-0">
             <DagCanvas
               width={baseLayout.width}
@@ -177,38 +170,11 @@ export function AgentTraceDag({ nodes, traceId, runStatus, traceCompleteness, co
           </div>
 
           {expanded && (
-            <div className="rounded-xl border border-accent/20 bg-surface/30 p-4 space-y-4 lg:sticky lg:top-20 lg:self-start max-h-[85vh] overflow-y-auto">
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <span className="font-bold text-primary">{expanded.title}</span>
-                  <p className="text-[10px] text-ink/50">{agentLabel(expanded.agent)} · 第 {expanded.sequence} 步 · trace {traceId.slice(0, 12)}…</p>
-                </div>
-                <button type="button" onClick={() => setExpandedGroup(null)} className="text-ink/40 hover:text-primary shrink-0 text-xs">收起</button>
-              </div>
-
-              <div className="flex flex-wrap gap-1">
-                {([
-                  ["io", "输入输出"],
-                  ["chain", "调用链"],
-                  ["waterfall", "耗时瀑布"],
-                  ["raw", "原始数据"],
-                ] as const).map(([key, label]) => (
-                  <button
-                    key={key}
-                    type="button"
-                    onClick={() => setPanelTab(key)}
-                    className={`rounded-lg px-2.5 py-1 text-[10px] font-bold ${panelTab === key ? "bg-accent text-white" : "bg-white text-ink/50"}`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-
-              {panelTab === "io" && <TraceCallGraph group={expanded} />}
-              {panelTab === "chain" && <TraceSpanTimeline group={expanded} page={spanPage} onPageChange={setSpanPage} />}
-              {panelTab === "waterfall" && <TraceSpanTimeline group={expanded} page={spanPage} onPageChange={setSpanPage} />}
-              {panelTab === "raw" && <PagedRawJson data={expanded.raw || expanded.calls} />}
-            </div>
+            <AgentWorkflowCanvas
+              group={expanded}
+              traceId={traceId}
+              onClose={() => setExpandedGroup(null)}
+            />
           )}
         </div>
       )}

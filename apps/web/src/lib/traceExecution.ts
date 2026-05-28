@@ -31,6 +31,10 @@ export interface AgentExecutionGroup {
   status: string;
   durationMs: number;
   traceNodeId: string;
+  promptPreview?: Record<string, unknown>;
+  decisionSteps?: Record<string, unknown>[];
+  internalGraph?: Record<string, unknown>;
+  businessMapping?: Record<string, unknown>;
   calls: {
     rag?: Record<string, unknown> | undefined;
     skills?: Record<string, unknown> | undefined;
@@ -75,6 +79,10 @@ export function groupTraceNodes(nodes: TraceNode[]): AgentExecutionGroup[] {
           status: node.status,
           durationMs: node.durationMs,
           traceNodeId: node.id,
+          promptPreview: out.promptPreview as Record<string, unknown> | undefined,
+          decisionSteps: (out.decisionSteps as Record<string, unknown>[]) || [],
+          internalGraph: out.internalGraph as Record<string, unknown> | undefined,
+          businessMapping: out.businessMapping as Record<string, unknown> | undefined,
           calls,
           raw: node,
         };
