@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { ProtectedLayout } from "@/components/ProtectedLayout";
 
 export const metadata: Metadata = {
   title: "LabelHub",
@@ -9,7 +10,11 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="zh-CN">
-      <body>{children}</body>
+      <body>
+        <ProtectedLayout>
+          {children}
+        </ProtectedLayout>
+      </body>
     </html>
   );
 }
