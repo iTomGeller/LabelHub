@@ -1,8 +1,13 @@
-CREATE TABLE tasks (
-  id VARCHAR(64) PRIMARY KEY,
-  title VARCHAR(255) NOT NULL,
+-- V1: Member A - Task Config and Domain Tables
+CREATE TABLE task_config (
+  task_id VARCHAR(64) PRIMARY KEY,
+  name VARCHAR(255) NOT NULL,
   description TEXT NOT NULL,
   status VARCHAR(32) NOT NULL,
+  total_items INT NOT NULL DEFAULT 0,
+  completed_items INT NOT NULL DEFAULT 0,
+  current_step INT NOT NULL DEFAULT 0,
+  total_steps INT NOT NULL DEFAULT 4,
   owner_id VARCHAR(64) NOT NULL,
   trace_id VARCHAR(128) NOT NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,

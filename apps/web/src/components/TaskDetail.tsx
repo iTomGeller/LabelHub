@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { mockTasks } from "@/lib/mockTasks";
 
 interface TaskPackageData {
   taskId: string;
@@ -35,7 +36,64 @@ export function TaskDetail({ taskId }: { taskId?: string }) {
     if (!taskId) return;
     const stored = localStorage.getItem(`labelhub_task_${taskId}`);
     if (stored) {
-      try { setPkg(JSON.parse(stored)); } catch { /* ignore */ }
+      try { 
+        setPkg(JSON.parse(stored)); 
+        return;
+      } catch { /* ignore */ }
+    }
+    // 降级：从 mockTasks 生成完整的任务包数据
+    const mockTask = mockTasks.find(t => t.id === taskId);
+    if (mockTask) {
+      const fallbackPkg: TaskPackageData = {
+        taskId: mockTask.id,
+        title: mockTask.name,
+        instruction: mockTask.description,
+        status: mockTask.status,
+        publishedAt: new Date(mockTask.updatedAt).toISOString(),
+        schema: {
+          components: [
+            { id: "c1", type: "text", label: "输入文本", dataPath: "content", required: true, props: {} },
+            { id: "c2", type: "choice", label: "分类结果", dataPath: "result", required: true, props: { options: ["正面", "负面", "中性"] } }
+          ]
+        },
+        rubric: {
+          dimensions: ["准确性", "完整性"],
+          rules: [
+            { ruleId: "r1", description: "标注结果必须与文本实际情感相符", severity: "critical", appliesTo: ["*"] },
+            { ruleId: "r2", description: "标注时需充分理解上下文语义", severity: "high", appliesTo: ["*"] }
+          ]
+        },
+        assignmentPolicy: {
+          mode: "auto_claim",
+          replicasPerItem: 1,
+          deadlineHours: 24,
+          quotaPerLabeler: 50
+        },
+        agentPolicy: {
+          precheckEnabled: true,
+          confidenceThreshold: 0.8
+        },
+        sampleItemCount: 10,
+        sampleData: [
+          { id: 1, content: "这个产品非常好用，强烈推荐！" },
+          { id: 2, content: "体验很差，完全不是宣传的那样" },
+          { id: 3, content: "一般般，没有想象中的好也没有太差" }
+        ],
+        dagReport: {
+          pipelineId: "pipeline_001",
+          allPassed: true,
+          totalMs: 12500,
+          stages: [
+            { stage: "task_context_builder", status: "success", durationMs: 2000, summary: "任务说明生成完成" },
+            { stage: "dataset_sampler", status: "success", durationMs: 1500, summary: "成功抽取10条样例数据" },
+            { stage: "schema_generator", status: "success", durationMs: 3000, summary: "自动生成2个标注组件" },
+            { stage: "rubric_generator", status: "success", durationMs: 2500, summary: "生成2条质检规则" },
+            { stage: "critic", status: "success", durationMs: 2000, summary: "质检全部通过" },
+            { stage: "task_package_writer", status: "success", durationMs: 1500, summary: "任务包发布成功" }
+          ]
+        }
+      };
+      setPkg(fallbackPkg);
     }
   }, [taskId]);
 

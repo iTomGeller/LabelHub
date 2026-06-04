@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { useAuthStore, UserRole, roleLabels } from '@/lib/auth';
+import { useAuthStore, UserRole, roleLabels, roleRoutes } from '@/lib/auth';
 
 const allNavItems = [
   { key: "tasks", label: "任务广场", href: "/tasks", roles: ['OWNER', 'LABELER', 'REVIEWER'] as UserRole[], external: false },
@@ -40,9 +40,7 @@ export function AppShell({ children, activeView, showAgentPanel = false, agentPa
   const handleRoleSwitch = (newRole: UserRole) => {
     switchRole(newRole);
     setShowRoleDropdown(false);
-    if (newRole === 'OWNER') router.push('/');
-    else if (newRole === 'LABELER') router.push('/tasks');
-    else if (newRole === 'REVIEWER') router.push('/review/complete');
+    router.push(roleRoutes[newRole]);
   };
 
   const handleLogout = () => {

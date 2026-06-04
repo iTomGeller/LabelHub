@@ -2,20 +2,7 @@
 
 import { useEffect, ReactNode } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
-import { useAuthStore, UserRole } from '@/lib/auth';
-
-function getHomePathForRole(role: UserRole): string {
-  switch (role) {
-    case 'OWNER':
-      return '/';
-    case 'LABELER':
-      return '/tasks';
-    case 'REVIEWER':
-      return '/review/complete';
-    default:
-      return '/tasks';
-  }
-}
+import { useAuthStore, roleRoutes } from '@/lib/auth';
 
 export function ProtectedLayout({ children }: { children: ReactNode }) {
   const router = useRouter();
@@ -28,10 +15,10 @@ export function ProtectedLayout({ children }: { children: ReactNode }) {
       router.push('/login');
     }
     if (isLoggedIn && pathname === '/login') {
-      router.push(getHomePathForRole(currentRole));
+      router.push(roleRoutes[currentRole]);
     }
     if (isLoggedIn && pathname === '/' && currentRole !== 'OWNER') {
-      router.push(getHomePathForRole(currentRole));
+      router.push(roleRoutes[currentRole]);
     }
   }, [isLoggedIn, pathname, currentRole, router]);
 

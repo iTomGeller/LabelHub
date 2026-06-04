@@ -1,12 +1,9 @@
 'use client';
 
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { AppShell } from '@/components/AppShell';
 import { TaskCard } from '@/components/TaskCard';
-
-const mockMyTasks = [
-  { id: '1', name: '情感分类标注', description: '你当前进行中的标注任务', totalItems: 100, completedItems: 45, deadline: '2026-05-30', status: '进行中' },
-];
+import { mockTasks } from '@/lib/mockTasks';
 
 const mockContribution = {
   totalAnnotations: 245,
@@ -17,6 +14,7 @@ const mockContribution = {
 
 export default function MyTasksPage() {
   const [activeTab, setActiveTab] = useState<'all' | 'pending-claim' | 'in-progress'>('all');
+  const myPublishedTasks = mockTasks.filter(t => t.status === 'publishing');
 
   return (
     <AppShell>
@@ -55,7 +53,18 @@ export default function MyTasksPage() {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {mockMyTasks.map(task => <TaskCard key={task.id} {...task} />)}
+          {myPublishedTasks.map(task => (
+            <TaskCard 
+              key={task.id} 
+              id={task.id} 
+              name={task.name} 
+              description={task.description} 
+              totalItems={task.totalItems} 
+              completedItems={task.completedItems} 
+              deadline={task.deadline} 
+              status={task.displayStatus} 
+            />
+          ))}
         </div>
       </div>
     </AppShell>

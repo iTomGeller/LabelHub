@@ -2,9 +2,9 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { mockTasks, STEP_NAMES, type MockTask } from "@/lib/mockTasks";
 import type { TaskStatus } from "@labelhub/contracts";
-
-const STEP_NAMES = ["数据上传", "配置模板", "质检规则", "确认发布"];
 
 type FilterKey = "all" | "draft" | "publishing" | "ended";
 
@@ -15,28 +15,22 @@ const FILTERS: { key: FilterKey; label: string }[] = [
   { key: "ended", label: "已结束" },
 ];
 
-const mockTasks = [
-  { taskId: "task_text_cls_001", title: "客服对话情感分类", status: "draft" as TaskStatus, currentStep: 2, totalSteps: 4, updatedAt: "2026-05-21 14:32" },
-  { taskId: "task_ner_002", title: "电商评论实体抽取", status: "draft" as TaskStatus, currentStep: 4, totalSteps: 4, updatedAt: "2026-05-20 09:15" },
-  { taskId: "task_qa_003", title: "问答对质量评估", status: "draft" as TaskStatus, currentStep: 1, totalSteps: 4, updatedAt: "2026-05-19 16:40" }
-];
-
 const statusLabels: Record<TaskStatus, string> = { draft: "草稿", publishing: "已发布", paused: "已暂停", ended: "已结束" };
 const statusColors: Record<TaskStatus, string> = { draft: "bg-primary/10 text-primary", publishing: "bg-success/10 text-success", paused: "bg-warning/10 text-warning", ended: "bg-ink/10 text-ink/60" };
 
 export function TaskList() {
   const router = useRouter();
-  const [tasks, setTasks] = useState(mockTasks);
+  const [tasks, setTasks] = useState<MockTask[]>(mockTasks);
   const [filter, setFilter] = useState<FilterKey>("all");
 
   useEffect(() => {
     setTasks(mockTasks.map(t => {
-      const stored = localStorage.getItem(`labelhub_task_${t.taskId}`);
+      const stored = localStorage.getItem(`labelhub_task_${t.id}`);
       if (stored) {
         try {
           const pkg = JSON.parse(stored);
           if (pkg.status === "published" || pkg.publishedAt) {
-            return { ...t, status: "publishing" as TaskStatus, currentStep: 4, updatedAt: pkg.publishedAt ? new Date(pkg.publishedAt).toLocaleString("zh-CN", { hour12: false }).slice(0, 16) : t.updatedAt };
+            return { ...t, status: "publishing" as const, currentStep: 4, updatedAt: pkg.publishedAt ? new Date(pkg.publishedAt).toLocaleString("zh-CN", { hour12: false }).slice(0, 16) : t.updatedAt };
           }
         } catch { /* ignore */ }
       }
@@ -46,10 +40,14 @@ export function TaskList() {
 
   const filtered = filter === "all" ? tasks : tasks.filter(t => t.status === filter);
 
-  function getTaskHref(task: typeof tasks[0]) {
-    if (task.status === "publishing") return `/?view=detail&taskId=${task.taskId}`;
-    return `/?view=task&taskId=${task.taskId}`;
+  function getTaskHref(task: MockTask) {
+    if (task.status === "publishing") return `/?view=detail&taskId=${task.id}`;
+    return `/?view=task&taskId=${task.id}`;
   }
+
+  const handleOpenTask = (task: MockTask) => {
+    router.push(getTaskHref(task));
+  };
 
   const handleNewTask = () => {
     router.push("/?view=task");
@@ -84,9 +82,9 @@ export function TaskList() {
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 min-w-0">
           {filtered.map((task) => (
-            <a key={task.taskId} href={getTaskHref(task)} className="group min-w-0 rounded-2xl border border-primary/10 bg-white p-5 shadow-sm transition hover:border-accent/40 hover:shadow-md">
+            <div key={task.id} onClick={() => handleOpenTask(task)} className="cursor-pointer group min-w-0 rounded-2xl border border-primary/10 bg-white p-5 shadow-sm transition hover:border-accent/40 hover:shadow-md">
               <div className="flex items-start justify-between">
-                <h3 className="font-bold text-primary group-hover:text-accent">{task.title}</h3>
+                <h3 className="font-bold text-primary group-hover:text-accent">{task.name}</h3>
                 <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${statusColors[task.status]}`}>{statusLabels[task.status]}</span>
               </div>
               <div className="mt-4">
@@ -99,7 +97,7 @@ export function TaskList() {
                 </div>
               </div>
               <p className="mt-3 text-xs text-ink/40">更新于 {task.updatedAt}</p>
-            </a>
+            </div>
           ))}
         </div>
       )}

@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useAuthStore, UserRole, roleLabels } from '@/lib/auth';
+import { useAuthStore, UserRole, roleLabels, roleRoutes } from '@/lib/auth';
 
 const availableRoles: { role: UserRole; desc: string; emoji: string }[] = [
   { role: 'OWNER', desc: '创建任务、配置 Schema、管理任务包', emoji: '👤' },
@@ -17,7 +17,7 @@ export default function LoginPage() {
 
   const handleLogin = () => {
     login(selectedRole, 'DemoUser');
-    router.push('/');
+    router.push(roleRoutes[selectedRole]);
   };
 
   return (
