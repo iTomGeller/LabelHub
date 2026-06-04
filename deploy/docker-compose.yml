@@ -1,98 +1,57 @@
+version: '3.8'
+
 services:
-  web:
-    build:
-      context: ..
-      dockerfile: apps/web/Dockerfile
-    environment:
-      NEXT_PUBLIC_API_BASE_URL: http://api:8080/api
-      AGENT_RUNTIME_URL: http://api:8080
-    ports:
-      - "3000:3000"
-    depends_on:
-      - api
-
-  api:
-    build:
-      context: ..
-      dockerfile: apps/api/Dockerfile
-    environment:
-      LABELHUB_API_PORT: 8080
-      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/labelhub
-      SPRING_DATASOURCE_USERNAME: labelhub
-      SPRING_DATASOURCE_PASSWORD: labelhub
-      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
-      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
-    ports:
-      - "8080:8080"
-    depends_on:
-      mysql:
-        condition: service_healthy
-      redis:
-        condition: service_started
-
-
   mysql:
-    image: mysql:8.4
+    image: mysql:8.0
+    container_name: labelhub-mysql
+    ports:
+      - "127.0.0.1:3307:3306"
     environment:
+      MYSQL_ROOT_PASSWORD: root123456
       MYSQL_DATABASE: labelhub
       MYSQL_USER: labelhub
       MYSQL_PASSWORD: labelhub
-      MYSQL_ROOT_PASSWORD: labelhub-root
-    ports:
-      - "3306:3306"
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
     volumes:
       - mysql-data:/var/lib/mysql
+    command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-ulabelhub", "-plabelhub"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   redis:
     image: redis:7-alpine
+    container_name: labelhub-redis
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6380:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 5
 
   minio:
-    image: minio/minio:latest
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: labelhub
-      MINIO_ROOT_PASSWORD: labelhub-secret
+    image: minio/minio
+    container_name: labelhub-minio
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
     volumes:
       - minio-data:/data
-
-  prometheus:
-    image: prom/prometheus:latest
-    volumes:
-      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-    ports:
-      - "9090:9090"
-    depends_on:
-      - api
-
-  grafana:
-    image: grafana/grafana:11.4.0
-    environment:
-      GF_SERVER_ROOT_URL: "%(protocol)s://%(domain)s/grafana/"
-      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
-      GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: labelhub
-      GF_AUTH_ANONYMOUS_ENABLED: "true"
-      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
-    ports:
-      - "3001:3000"
-    volumes:
-      - grafana-data:/var/lib/grafana
-      - ./grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
-    depends_on:
-      - prometheus
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
 volumes:
   mysql-data:
+  redis-data:
   minio-data:
-  grafana-data:

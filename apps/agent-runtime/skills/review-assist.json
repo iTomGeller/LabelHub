@@ -1,0 +1,35 @@
+{
+  "name": "review-assist",
+  "version": "1.0",
+  "description": "人工审核辅助输出规则 - 成员B的ReviewAssistAgent使用此Skill",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "taskId": { "type": "string" },
+      "itemId": { "type": "string" },
+      "annotationResult": { "type": "object" }
+    },
+    "required": ["taskId", "itemId", "annotationResult"]
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "taskId": { "type": "string" },
+      "itemId": { "type": "string" },
+      "similarCases": { "type": "array" },
+      "conflictExplanation": { "type": ["object", "null"] },
+      "riskTags": { "type": "array" },
+      "metadata": { "type": "object" }
+    }
+  },
+  "examples": [
+    {
+      "input": {"taskId": "task-001", "itemId": "item-001", "annotationResult": {"label": "positive"}},
+      "output": {
+        "similarCases": [],
+        "riskTags": ["normal"],
+        "metadata": {"similarCaseCount": 0}
+      }
+    }
+  ]
+}

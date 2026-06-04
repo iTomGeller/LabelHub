@@ -1,0 +1,9 @@
+{
+  "eventType": "REVIEW_PASSED_EVENT",
+  "taskId": "task-001",
+  "itemId": "item-001",
+  "reviewerId": "user-reviewer-001",
+  "decision": "PASS",
+  "comment": "",
+  "traceId": "trace-abc123"
+}

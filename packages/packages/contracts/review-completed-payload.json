@@ -1,0 +1,12 @@
+{
+  "taskId": "task-sentiment-001",
+  "itemId": "item-data-001",
+  "reviewerId": "user-reviewer-001",
+  "decision": "PASSED",
+  "comment": "标注完全准确，符合要求",
+  "reviewRound": 1,
+  "fieldLevelDifferences": null,
+  "aiReviewConsistencyScore": 0.92,
+  "traceId": "trace-a7f3e2b1-001",
+  "reviewedAt": "2026-05-22T10:03:00Z"
+}

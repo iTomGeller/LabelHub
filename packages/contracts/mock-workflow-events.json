@@ -1,0 +1,22 @@
+[
+  {
+    "eventId": "evt-001",
+    "eventType": "ITEM_ASSIGNED",
+    "taskId": "task-001",
+    "itemId": "item-001",
+    "actorId": "user-labeler-001",
+    "actorType": "HUMAN",
+    "timestamp": "2026-05-22T10:00:00Z",
+    "payload": {}
+  },
+  {
+    "eventId": "evt-002",
+    "eventType": "ANNOTATION_SUBMITTED",
+    "taskId": "task-001",
+    "itemId": "item-001",
+    "actorId": "user-labeler-001",
+    "actorType": "HUMAN",
+    "timestamp": "2026-05-22T10:05:00Z",
+    "payload": {}
+  }
+]

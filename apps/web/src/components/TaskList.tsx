@@ -51,6 +51,25 @@ export function TaskList() {
 
   return (
     <div className="space-y-6 min-w-0">
+      {/* B 侧标注员工作台快捷入口 */}
+      <section className="rounded-2xl border border-primary/10 bg-white p-5">
+        <h2 className="font-semibold text-primary mb-3">🖊️ 标注员工作台快捷入口（成员 B 闭环）</h2>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <a href="/tasks" className="p-3 bg-blue-50 rounded-xl text-center text-sm font-medium text-primary hover:bg-blue-100 transition">
+            📋 任务广场
+          </a>
+          <a href="/my-tasks" className="p-3 bg-green-50 rounded-xl text-center text-sm font-medium text-primary hover:bg-green-100 transition">
+            📝 我的任务
+          </a>
+          <a href="/annotation/dynamic" className="p-3 bg-yellow-50 rounded-xl text-center text-sm font-medium text-primary hover:bg-yellow-100 transition">
+            ✏️ 动态标注
+          </a>
+          <a href="/review/complete" className="p-3 bg-purple-50 rounded-xl text-center text-sm font-medium text-primary hover:bg-purple-100 transition">
+            👁️ 审核工作台
+          </a>
+        </div>
+      </section>
+
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between min-w-0">
         <div className="min-w-0">
           <h1 className="font-display text-3xl font-bold text-primary">任务列表</h1>

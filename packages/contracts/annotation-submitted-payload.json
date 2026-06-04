@@ -1,0 +1,11 @@
+{
+  "eventType": "ANNOTATION_SUBMITTED",
+  "taskId": "task-001",
+  "itemId": "item-001",
+  "labelerId": "user-labeler-001",
+  "annotationResult": {
+    "sentiment": "负面",
+    "confidence": 0.9
+  },
+  "traceId": "trace-abc123"
+}

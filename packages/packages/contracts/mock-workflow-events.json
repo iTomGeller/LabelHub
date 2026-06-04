@@ -1,0 +1,48 @@
+[
+  {
+    "eventId": "evt-001",
+    "eventType": "ANNOTATION_SUBMITTED",
+    "taskId": "task-sentiment-001",
+    "itemId": "item-data-001",
+    "actorId": "user-labeler-001",
+    "actorType": "HUMAN",
+    "timestamp": "2026-05-22T10:00:00Z",
+    "payload": {
+      "schemaVersionId": "schema-v2.1",
+      "rubricVersionId": "rubric-v1.0",
+      "annotationResult": { "sentiment": "正面", "confidence": 0.95 },
+      "annotationDurationMs": 12500
+    },
+    "traceId": "trace-a7f3e2b1-001"
+  },
+  {
+    "eventId": "evt-002",
+    "eventType": "ANNOTATION_SUBMITTED",
+    "taskId": "task-sentiment-001",
+    "itemId": "item-data-002",
+    "actorId": "user-labeler-002",
+    "actorType": "HUMAN",
+    "timestamp": "2026-05-22T10:01:00Z",
+    "payload": {
+      "schemaVersionId": "schema-v2.1",
+      "rubricVersionId": "rubric-v1.0",
+      "annotationResult": { "sentiment": "负面" },
+      "annotationDurationMs": 9800
+    },
+    "traceId": "trace-a7f3e2b1-002"
+  },
+  {
+    "eventId": "evt-003",
+    "eventType": "REVIEW_PASSED_EVENT",
+    "taskId": "task-sentiment-001",
+    "itemId": "item-data-001",
+    "actorId": "user-reviewer-001",
+    "actorType": "HUMAN",
+    "timestamp": "2026-05-22T10:03:00Z",
+    "payload": {
+      "comment": "标注完全准确，符合要求",
+      "reviewRound": 1
+    },
+    "traceId": "trace-a7f3e2b1-001"
+  }
+]
