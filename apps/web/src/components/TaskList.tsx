@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import type { TaskStatus } from "@labelhub/contracts";
 
 const STEP_NAMES = ["数据上传", "配置模板", "质检规则", "确认发布"];
@@ -24,6 +25,7 @@ const statusLabels: Record<TaskStatus, string> = { draft: "草稿", publishing: 
 const statusColors: Record<TaskStatus, string> = { draft: "bg-primary/10 text-primary", publishing: "bg-success/10 text-success", paused: "bg-warning/10 text-warning", ended: "bg-ink/10 text-ink/60" };
 
 export function TaskList() {
+  const router = useRouter();
   const [tasks, setTasks] = useState(mockTasks);
   const [filter, setFilter] = useState<FilterKey>("all");
 
@@ -49,6 +51,10 @@ export function TaskList() {
     return `/?view=task&taskId=${task.taskId}`;
   }
 
+  const handleNewTask = () => {
+    router.push("/?view=task");
+  };
+
   return (
     <div className="space-y-6 min-w-0">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between min-w-0">
@@ -56,7 +62,7 @@ export function TaskList() {
           <h1 className="font-display text-3xl font-bold text-primary">任务列表</h1>
           <p className="mt-1 text-sm text-ink/60">管理所有标注任务，点击查看详情或继续配置。</p>
         </div>
-        <a href="/?view=task" className="shrink-0 self-start rounded-xl bg-accent px-5 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-accent/90">+ 新建任务</a>
+        <button onClick={handleNewTask} className="shrink-0 self-start rounded-xl bg-accent px-5 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-accent/90">+ 新建任务</button>
       </div>
 
       {/* Filter Tabs */}
