@@ -9,7 +9,7 @@ const allNavItems = [
   { key: "list", label: "任务列表", href: "/?view=list", roles: ['OWNER'] as UserRole[], external: false },
   { key: "trace", label: "开发者 Trace", href: "/?view=trace", roles: ['OWNER'] as UserRole[], external: false },
   { key: "settings", label: "系统设置", href: "/?view=settings", roles: ['OWNER'] as UserRole[], external: false },
-  { key: "grafana", label: "监控面板", href: "http://localhost:3001", roles: ['OWNER', 'REVIEWER'] as UserRole[], external: true },
+  { key: "grafana", label: "监控面板", href: "http://localhost:3001", roles: ['OWNER'] as UserRole[], external: true },
   { key: "tasks", label: "任务广场", href: "/tasks", roles: ['OWNER', 'LABELER', 'REVIEWER'] as UserRole[], external: false },
   { key: "my-tasks", label: "我的任务", href: "/my-tasks", roles: ['LABELER'] as UserRole[], external: false },
   { key: "annotation", label: "动态标注", href: "/annotation/dynamic", roles: ['LABELER'] as UserRole[], external: false },
