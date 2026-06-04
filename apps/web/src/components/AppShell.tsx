@@ -7,6 +7,7 @@ import { useAuthStore, UserRole, roleLabels } from '@/lib/auth';
 
 const allNavItems = [
   { key: "list", label: "任务列表", href: "/?view=list", roles: ['OWNER'] as UserRole[], external: false },
+  { key: "task", label: "新建任务", href: "/?view=task", roles: ['OWNER'] as UserRole[], external: false },
   { key: "trace", label: "开发者 Trace", href: "/?view=trace", roles: ['OWNER'] as UserRole[], external: false },
   { key: "settings", label: "系统设置", href: "/?view=settings", roles: ['OWNER'] as UserRole[], external: false },
   { key: "grafana", label: "监控面板", href: "http://localhost:3001", roles: ['OWNER'] as UserRole[], external: true },

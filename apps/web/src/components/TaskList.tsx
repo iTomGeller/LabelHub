@@ -2,22 +2,30 @@
 
 import { useState, useEffect } from "react";
 import type { TaskStatus } from "@labelhub/contracts";
+import { TaskCard } from "@/components/TaskCard";
 
 const STEP_NAMES = ["数据上传", "配置模板", "质检规则", "确认发布"];
 
-type FilterKey = "all" | "draft" | "publishing" | "ended";
+type FilterKey = "all" | "draft" | "publishing" | "ended" | "public";
 
 const FILTERS: { key: FilterKey; label: string }[] = [
   { key: "all", label: "全部" },
   { key: "draft", label: "草稿" },
   { key: "publishing", label: "已发布" },
   { key: "ended", label: "已结束" },
+  { key: "public", label: "公开任务广场" },
 ];
 
 const mockTasks = [
   { taskId: "task_text_cls_001", title: "客服对话情感分类", status: "draft" as TaskStatus, currentStep: 2, totalSteps: 4, updatedAt: "2026-05-21 14:32" },
   { taskId: "task_ner_002", title: "电商评论实体抽取", status: "draft" as TaskStatus, currentStep: 4, totalSteps: 4, updatedAt: "2026-05-20 09:15" },
-  { taskId: "task_qa_003", title: "问答对质量评估", status: "draft" as TaskStatus, currentStep: 1, totalSteps: 4, updatedAt: "2026-05-19 16:40" }
+  { taskId: "task_qa_003", title: "问答对质量评估", status: "draft" as TaskStatus, currentStep: 1, totalSteps: 4, updatedAt: "2026-05-19 16:40" },
+];
+
+const mockPublicTasks = [
+  { id: '1', name: '情感分类标注', description: '对用户评论进行正面/负面情感标注', totalItems: 100, completedItems: 45, deadline: '2026-06-15', status: '进行中' },
+  { id: '2', name: '实体识别', description: '抽取文本中的人物、地点、组织机构实体', totalItems: 200, completedItems: 120, deadline: '2026-06-15', status: '待领取' },
+  { id: '3', name: '图片语义分割', description: '对自动驾驶场景图片进行像素级分割标注', totalItems: 50, completedItems: 50, deadline: '2026-05-20', status: '已完成' },
 ];
 
 const statusLabels: Record<TaskStatus, string> = { draft: "草稿", publishing: "已发布", paused: "已暂停", ended: "已结束" };
@@ -84,13 +92,20 @@ export function TaskList() {
           <button key={f.key} onClick={() => setFilter(f.key)} className={`rounded-lg px-4 py-2 text-sm font-bold transition ${filter === f.key ? "bg-accent text-white shadow-sm" : "text-ink/50 hover:text-primary hover:bg-surface/60"}`}>
             {f.label}
             <span className={`ml-1.5 text-xs ${filter === f.key ? "text-white/70" : "text-ink/30"}`}>
-              {f.key === "all" ? tasks.length : tasks.filter(t => t.status === f.key).length}
+              {f.key === "all" ? tasks.length : f.key === "public" ? mockPublicTasks.length : tasks.filter(t => t.status === f.key).length}
             </span>
           </button>
         ))}
       </div>
 
-      {filtered.length === 0 ? (
+      {filter === "public" ? (
+        <div className="space-y-6">
+          <p className="text-sm text-ink/60">公开任务广场 - 所有已发布的公开任务，标注员可以自由领取</p>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {mockPublicTasks.map(task => <TaskCard key={task.id} {...task} />)}
+          </div>
+        </div>
+      ) : filtered.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-primary/15 bg-white p-12 text-center">
           <p className="text-sm text-ink/40">暂无{filter !== "all" ? statusLabels[filter as TaskStatus] : ""}任务</p>
         </div>
