@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { AppShellB } from '@/components/AppShellB';
+import { AppShell } from '@/components/AppShell';
 import { AnnotationRenderer } from '@/components/AnnotationRenderer';
 
 export default function DynamicAnnotationPage() {
@@ -20,7 +20,7 @@ export default function DynamicAnnotationPage() {
   };
 
   return (
-    <AppShellB>
+    <AppShell>
       <div className="p-6 max-w-4xl mx-auto">
         <h1 className="text-2xl font-bold mb-4">动态标注页</h1>
         <div className="p-4 bg-gray-50 rounded-lg mb-6">
@@ -33,6 +33,6 @@ export default function DynamicAnnotationPage() {
           onDraftSave={handleDraftSave}
         />
       </div>
-    </AppShellB>
+    </AppShell>
   );
 }

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { AppShellB } from '@/components/AppShellB';
+import { AppShell } from '@/components/AppShell';
 import { ReviewWorkbench } from '@/components/ReviewWorkbench';
 import { AgentPanelB } from '@/components/AgentPanelB';
 import { TraceDrawer } from '@/components/TraceDrawer';
@@ -37,7 +37,7 @@ export default function CompleteReviewPage() {
   );
 
   return (
-    <AppShellB showAgentPanel agentPanelContent={agentPanelContent}>
+    <AppShell showAgentPanel agentPanelContent={agentPanelContent}>
       <div className="p-6">
         <div className="flex items-center justify-between mb-4">
           <h1 className="text-2xl font-bold">审核工作台 - 字段级差异视图</h1>
@@ -61,6 +61,6 @@ export default function CompleteReviewPage() {
           events={mockTraceEvents}
         />
       </div>
-    </AppShellB>
+    </AppShell>
   );
 }

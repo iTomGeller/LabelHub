@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { AppShellB } from '@/components/AppShellB';
+import { AppShell } from '@/components/AppShell';
 import { TaskCard } from '@/components/TaskCard';
 
 const mockMyTasks = [
@@ -19,7 +19,7 @@ export default function MyTasksPage() {
   const [activeTab, setActiveTab] = useState<'all' | 'pending-claim' | 'in-progress'>('all');
 
   return (
-    <AppShellB>
+    <AppShell>
       <div className="p-6">
         <h1 className="text-2xl font-bold mb-6">我的工作台</h1>
         
@@ -58,6 +58,6 @@ export default function MyTasksPage() {
           {mockMyTasks.map(task => <TaskCard key={task.id} {...task} />)}
         </div>
       </div>
-    </AppShellB>
+    </AppShell>
   );
 }

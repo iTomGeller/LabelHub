@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { AppShellB } from '@/components/AppShellB';
+import { AppShell } from '@/components/AppShell';
 import { TaskCard } from '@/components/TaskCard';
 
 const mockTasks = [
@@ -12,13 +12,13 @@ const mockTasks = [
 
 export default function TaskPlazaPage() {
   return (
-    <AppShellB>
+    <AppShell>
       <div className="p-6">
         <h1 className="text-2xl font-bold mb-6">任务广场</h1>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {mockTasks.map(task => <TaskCard key={task.id} {...task} />)}
         </div>
       </div>
-    </AppShellB>
+    </AppShell>
   );
 }
